@@ -5,9 +5,11 @@
 # ==============================================================================
 set -o errexit -o nounset -o pipefail
 
-DOMAIN_DEFAULT="home.blueml.one"
-IPV6_PREFIX_LENGTH_DEFAULT=56
-STATE_DIR="/var/lib/unban-whitelist"
+if [[ ! -f "unban_ip.env" ]]; then
+  echo "FEHLER: unban_ip.env nicht gefunden. Bitte aus unban_ip.env.example erstellen." >&2
+  exit 1
+fi
+source "unban_ip.env"
 
 # Farben
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; BLUE=$'\033[0;34m'; NC=$'\033[0m'

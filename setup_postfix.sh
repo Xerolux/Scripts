@@ -21,18 +21,15 @@
 # ==============================================================================
 set -Eeuo pipefail
 
-POSTFIX_VERSION="3.11.1"
+if [[ ! -f "setup_postfix.env" ]]; then
+  echo "FEHLER: setup_postfix.env nicht gefunden. Bitte aus setup_postfix.env.example erstellen." >&2
+  exit 1
+fi
+source "setup_postfix.env"
+
 POSTFIX_TARBALL="https://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
 # Spiegel-Fallback
 POSTFIX_TARBALL_MIRROR="https://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
-
-BUILD_ROOT="/usr/local/src"
-BACKUP_ROOT="/root/postfix-backup"
-LATEST_LINK="$BACKUP_ROOT/latest"
-LOG_FILE="/var/log/setup_postfix.log"
-PACKAGE_DIR="/root/postfix-packages"
-
-STAGE_POSTFIX="/tmp/postfix-stage"
 
 # Installationspfade (passend zu bestehender ISPConfig-Installation)
 POSTFIX_DAEMON_DIR="/usr/lib/postfix"

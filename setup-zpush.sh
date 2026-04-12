@@ -5,9 +5,11 @@ set -euo pipefail
 # Z-Push PRO Setup (with rollback & safety)
 ############################################
 
-PUSH_DOMAIN="push.blueml.eu"
-MAIL_HOST="mail.blueml.eu"
-TEST_USER="basti@blueml.eu"
+if [[ ! -f "setup-zpush.env" ]]; then
+  echo "FEHLER: setup-zpush.env nicht gefunden. Bitte aus setup-zpush.env.example erstellen." >&2
+  exit 1
+fi
+source "setup-zpush.env"
 
 ZPUSH_DIR="/etc/z-push"
 NGINX_AVAILABLE="/etc/nginx/sites-available"
@@ -81,7 +83,7 @@ log "PHP Socket: $PHP_SOCK"
 # SSL Detection
 ############################################
 
-SSL_BASE="$(find /etc/letsencrypt/live -type d | grep blueml | head -n1)"
+SSL_BASE="$(find /etc/letsencrypt/live -type d | grep "$SSL_SEARCH_DOMAIN" | head -n1)"
 [[ -d "$SSL_BASE" ]] || fail "Kein Zertifikat gefunden"
 
 log "SSL Path: $SSL_BASE"
