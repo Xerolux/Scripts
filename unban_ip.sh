@@ -93,27 +93,22 @@ f2b_is_banned_in_jail() {
 f2b_ignore_contains() {
   local j="$1" v="$2"
   local cur; cur="$(fail2ban-client get "$j" ignoreip 2>/dev/null || true)"
-  tr ' ' '\n' <<<"$cur" | grep -Fxq -- "$v"
+  grep -Fqw -- "$v" <<<"$cur"
 }
 
 f2b_unban() {
   local t="$1" test="$2"
   command -v fail2ban-client >/dev/null 2>&1 || return 0
-  
-  while IFS= read -r j; do
-    [[ -z "$j" ]] && continue
-    if f2b_is_banned_in_jail "$j" "$t"; then
-      if [[ "$test" == "true" ]]; then
-        echo -e "${GREEN}[TEST] F2B: unban '$t' in '$j'.${NC}" >&2
-      else
-        if fail2ban-client set "$j" unbanip "$t" >/dev/null 2>&1; then
-          echo -e "${GREEN}F2B: '$t' aus '$j' entbannt.${NC}" >&2
-        else
-          echo -e "${RED}F2B: unban fehlgeschlagen ($t/$j).${NC}" >&2
-        fi
-      fi
+
+  if [[ "$test" == "true" ]]; then
+    echo -e "${GREEN}[TEST] F2B: unban '$t'.${NC}" >&2
+  else
+    local res
+    res="$(fail2ban-client unban "$t" 2>/dev/null || echo 0)"
+    if [[ "$res" =~ ^[0-9]+$ ]] && [[ "$res" -gt 0 ]]; then
+      echo -e "${GREEN}F2B: '$t' aus allen Jails entbannt (Anzahl: $res).${NC}" >&2
     fi
-  done < <(get_f2b_jails)
+  fi
 }
 
 f2b_add_ignore() {
@@ -190,7 +185,11 @@ cs_allowlist_remove_value() {
 }
 
 cs_unban_any() {
-  local t="$1"
+  local t="$1" test="${2:-false}"
+  if [[ "$test" == "true" ]]; then
+    echo -e "${GREEN}[TEST] CS: decisions delete '$t'${NC}" >&2
+    return 0
+  fi
   # CrowdSec unban ist global, keine Allowlist nötig
   if [[ "$t" == */* ]]; then
     cscli decisions delete --range "$t" >/dev/null 2>&1 || true
@@ -209,8 +208,10 @@ show_bans() {
       echo -e "${BLUE}Jail: $j${NC}"
       local lst; lst="$(fail2ban-client status "$j" | sed -n 's/.*Banned IP list:\s*//p')"
       if [[ -n "$lst" ]]; then
-        tr ' ' '\n' <<<"$lst" | sed 's/^/  - /'
-        local c; c="$(tr ' ' '\n' <<<"$lst" | grep -c . || true)"; tot=$((tot+c))
+        local -a ips_arr
+        read -r -a ips_arr <<< "$lst"
+        printf "  - %s\n" "${ips_arr[@]}"
+        tot=$((tot + ${#ips_arr[@]}))
       else
         echo "  (leer)"
       fi
@@ -230,7 +231,9 @@ show_bans() {
       # wir filtern auf einfache IP Liste
       local ips; ips="$(echo "$raw" | awk -F',' 'NR>1 {print $3}')"
       if [[ -n "$ips" ]]; then
-         echo "$ips" | sed 's/^/  - /'
+         while IFS= read -r line; do
+           echo "  - $line"
+         done <<< "$ips"
          n="$(echo "$ips" | grep -c . || true)"
       else
          echo "  (leer)"
@@ -245,18 +248,28 @@ show_bans() {
 }
 
 # ---------------- State & Logic ----------------
-load_prev_set() { [[ -f "$1" ]] && grep -Ev '^[[:space:]]*$' -- "$1" || true; }
+load_prev_set() {
+  if [[ -f "$1" ]]; then
+    grep -Ev '^[[:space:]]*$' -- "$1" || true
+  fi
+}
 save_curr_set() { local f="$1"; shift; printf '%s\n' "$@" | grep -Ev '^[[:space:]]*$' | sort -u > "${f}.tmp"; mv "${f}.tmp" "$f"; }
 
 apply_targets() {
   local test="$1" allowlist_name="$2"; shift 2
   local t
+
+  local existing_allowlist=""
+  if [[ "$test" != "true" ]]; then
+    existing_allowlist="$(cs_allowlist_values "$allowlist_name")"
+  fi
+
   for t in "$@"; do
     [[ -z "$t" ]] && continue
     
     # 1. Unban (F2B + CS)
     f2b_unban "$t" "$test"
-    cs_unban_any "$t"
+    cs_unban_any "$t" "$test"
     
     # 2. Whitelist Add
     f2b_add_ignore "$t" "$test"
@@ -265,7 +278,7 @@ apply_targets() {
       echo -e "${GREEN}[TEST] CS: allowlists add '$t' -> '$allowlist_name'${NC}" >&2
     else
       # nur hinzufügen, wenn noch nicht drin (API calls sparen)
-      if ! cs_allowlist_values "$allowlist_name" | grep -Fxq -- "$t"; then
+      if ! grep -Fqw -- "$t" <<< "$existing_allowlist"; then
         cs_allowlist_add_value "$allowlist_name" "$t"
         echo -e "${GREEN}CS: Allowlist '$allowlist_name' erweitert um: $t${NC}" >&2
       fi
@@ -290,7 +303,7 @@ cleanup_old_targets() {
 
     # 2. Sicherstellen: nicht gebannt (falls währenddessen gebannt wurde)
     f2b_unban "$t" "$test"
-    cs_unban_any "$t"
+    cs_unban_any "$t" "$test"
   done
 }
 
