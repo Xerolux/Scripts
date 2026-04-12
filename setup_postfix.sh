@@ -132,6 +132,8 @@ install_build_deps() {
     libicu-dev \
     libpam0g-dev \
     ruby ruby-dev rubygems rpm \
+    libpq-dev \
+    libcdb-dev \
     wget curl
 
   # fpm für .deb-Erstellung
@@ -285,6 +287,24 @@ build_ccargs() {
     AUXLIBS="$AUXLIBS $(pkg-config --libs icu-uc icu-i18n)"
   else
     log "  [-] ICU nicht gefunden (libicu-dev prüfen)"
+  fi
+
+  # --- PostgreSQL ------------------------------------------------------------
+  if [ -f /usr/include/postgresql/libpq-fe.h ]; then
+    log "  [+] PostgreSQL"
+    CCARGS="$CCARGS -DHAS_PGSQL -I/usr/include/postgresql"
+    AUXLIBS="$AUXLIBS -lpq"
+  else
+    log "  [-] PostgreSQL nicht gefunden (libpq-dev prüfen)"
+  fi
+
+  # --- CDB -------------------------------------------------------------------
+  if [ -f /usr/include/cdb.h ]; then
+    log "  [+] CDB"
+    CCARGS="$CCARGS -DHAS_CDB"
+    AUXLIBS="$AUXLIBS -lcdb"
+  else
+    log "  [-] CDB nicht gefunden (libcdb-dev prüfen)"
   fi
 
   # --- Sicherheitshärtung (analog zu Debian-Paketen) ------------------------
@@ -742,10 +762,21 @@ check_os_arch() {
     echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
     exit 1
   fi
+
+  if ! command -v screen >/dev/null 2>&1; then
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
+  fi
 }
 
 main() {
   check_os_arch
+
+  if [ -z "${STY:-}" ]; then
+    echo "Starte Skript im Hintergrund (Screen Session: postfix_build)..."
+    exec screen -dmS postfix_build bash "$0" "$@"
+    exit 0
+  fi
+
   require_root
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"
   touch "$LOG_FILE"

@@ -145,7 +145,11 @@ install_build_deps() {
     libsystemd-dev \
     libunwind-dev \
     libgdbm-dev \
-    ruby ruby-dev rubygems rpm
+    ruby ruby-dev rubygems rpm \
+    libpq-dev \
+    libclucene-dev \
+    libcurl4-openssl-dev \
+    libexpat1-dev
 
   if ! command -v fpm >/dev/null 2>&1; then
     log "Installiere fpm"
@@ -235,9 +239,7 @@ build_dovecot() {
   #   --with-systemd         systemd socket activation + journal logging
   #
   # NICHT GESETZT (bewusst):
-  #   --with-postgresql      Nicht nötig, ISPConfig nutzt MySQL
   #   --with-cassandra       Nur für sehr große Deployments
-  #   --with-solr            Volltextsuche, separater Solr-Server nötig
   #   --enable-doveadm-http  REST-API, kein Bedarf in dieser Umgebung
   ./configure \
     --enable-maintainer-mode \
@@ -251,6 +253,9 @@ build_dovecot() {
     --with-ioloop=best \
     --with-mysql \
     --with-sqlite \
+    --with-pgsql \
+    --with-solr \
+    --with-lucene \
     --with-ldap=yes \
     --with-pam \
     --with-gssapi \
@@ -1157,10 +1162,21 @@ check_os_arch() {
     echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
     exit 1
   fi
+
+  if ! command -v screen >/dev/null 2>&1; then
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
+  fi
 }
 
 main() {
   check_os_arch
+
+  if [ -z "${STY:-}" ]; then
+    echo "Starte Skript im Hintergrund (Screen Session: dovecot_build)..."
+    exec screen -dmS dovecot_build bash "$0" "$@"
+    exit 0
+  fi
+
   require_root
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"
   touch "$LOG_FILE"
