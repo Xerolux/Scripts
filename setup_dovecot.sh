@@ -16,14 +16,11 @@
 # ==============================================================================
 set -Eeuo pipefail
 
-DOVECOT_VERSION="2.4.3"
-PIGEONHOLE_VERSION="2.4.3"
-
-BUILD_ROOT="/usr/local/src"
-BACKUP_ROOT="/root/dovecot-backup"
-LATEST_LINK="$BACKUP_ROOT/latest"
-LOG_FILE="/var/log/setup_dovecot.log"
-PACKAGE_DIR="/root/dovecot-packages"          # Zielordner für .deb-Dateien
+if [[ ! -f "setup_dovecot.env" ]]; then
+  echo "FEHLER: setup_dovecot.env nicht gefunden. Bitte aus setup_dovecot.env.example erstellen." >&2
+  exit 1
+fi
+source "setup_dovecot.env"
 
 # Offizielle Tarballs (stabiler als Git-Clone, enthalten fertige configure-Skripte)
 DOVECOT_TARBALL="https://dovecot.org/releases/2.4/dovecot-${DOVECOT_VERSION}.tar.gz"
