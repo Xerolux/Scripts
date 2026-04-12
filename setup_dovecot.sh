@@ -145,7 +145,11 @@ install_build_deps() {
     libsystemd-dev \
     libunwind-dev \
     libgdbm-dev \
-    ruby ruby-dev rubygems rpm
+    ruby ruby-dev rubygems rpm \
+    libpq-dev \
+    libclucene-dev \
+    libcurl4-openssl-dev \
+    libexpat1-dev
 
   if ! command -v fpm >/dev/null 2>&1; then
     log "Installiere fpm"
@@ -235,9 +239,7 @@ build_dovecot() {
   #   --with-systemd         systemd socket activation + journal logging
   #
   # NICHT GESETZT (bewusst):
-  #   --with-postgresql      Nicht nötig, ISPConfig nutzt MySQL
   #   --with-cassandra       Nur für sehr große Deployments
-  #   --with-solr            Volltextsuche, separater Solr-Server nötig
   #   --enable-doveadm-http  REST-API, kein Bedarf in dieser Umgebung
   ./configure \
     --enable-maintainer-mode \
@@ -251,6 +253,9 @@ build_dovecot() {
     --with-ioloop=best \
     --with-mysql \
     --with-sqlite \
+    --with-pgsql \
+    --with-solr \
+    --with-lucene \
     --with-ldap=yes \
     --with-pam \
     --with-gssapi \
@@ -575,6 +580,12 @@ POSTRM
   echo "HINWEIS: /etc/dovecot ist NICHT in den Paketen."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
   echo ""
+  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  if [ -x "$repo_script" ]; then
+    log "Aktualisiere lokales Repository..."
+    "$repo_script" update || true
+  fi
+
   echo "Nächster Schritt:          $0 install"
   echo "Später deinstallieren:     $0 uninstall"
 }
@@ -998,6 +1009,12 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
   echo ""
   log "=== Dovecot-Core Paket-Build abgeschlossen ==="
   echo "Paket: $deb_core"
+  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  if [ -x "$repo_script" ]; then
+    log "Aktualisiere lokales Repository..."
+    "$repo_script" update || true
+  fi
+
   echo "Nächster Schritt: $0 package-pigeonhole"
 }
 
@@ -1080,6 +1097,12 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
   echo ""
   log "=== Pigeonhole Paket-Build abgeschlossen ==="
   echo "Paket: $deb_sieve"
+  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  if [ -x "$repo_script" ]; then
+    log "Aktualisiere lokales Repository..."
+    "$repo_script" update || true
+  fi
+
   echo "Nächster Schritt: $0 install"
 }
 
@@ -1129,7 +1152,31 @@ install_all() {
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
+check_os_arch() {
+  local os_id=$(grep "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+  local os_version_id=$(grep "^VERSION_ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+  local os_major_version=$(echo "$os_version_id" | cut -d. -f1)
+  local arch=$(dpkg --print-architecture)
+
+  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
+    echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
+    exit 1
+  fi
+
+  if ! command -v screen >/dev/null 2>&1; then
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
+  fi
+}
+
 main() {
+  check_os_arch
+
+  if [ -z "${STY:-}" ]; then
+    echo "Starte Skript im Hintergrund (Screen Session: dovecot_build)..."
+    exec screen -dmS dovecot_build bash "$0" "$@"
+    exit 0
+  fi
+
   require_root
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"
   touch "$LOG_FILE"
