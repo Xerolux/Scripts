@@ -32,14 +32,7 @@ POSTFIX_TARBALL="https://ftp.porcupine.org/mirrors/postfix-release/official/post
 POSTFIX_TARBALL_MIRROR="https://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
 
 # Installationspfade (passend zu bestehender ISPConfig-Installation)
-POSTFIX_DAEMON_DIR="/usr/lib/postfix"
-POSTFIX_COMMAND_DIR="/usr/sbin"
-POSTFIX_QUEUE_DIR="/var/spool/postfix"
-POSTFIX_DATA_DIR="/var/lib/postfix"
-POSTFIX_CONFIG_DIR="/etc/postfix"
-POSTFIX_SHLIB_DIR="/usr/lib/postfix"
-POSTFIX_META_DIR="/etc/postfix"
-
+# Diese werden in der Funktion create_deb_package direkt verwendet
 # ------------------------------------------------------------------------------
 # Hilfsfunktionen
 # ------------------------------------------------------------------------------
@@ -330,6 +323,7 @@ build_postfix() {
   local flags_file
   flags_file="$(mktemp)"
   build_ccargs > "$flags_file"
+  # shellcheck source=/dev/null
   source "$flags_file"
   rm -f "$flags_file"
 
@@ -463,12 +457,13 @@ create_deb_package() {
 
   echo ""
   log "===== Paket fertig ====="
-  ls -lh "$deb_file" | tee -a "$LOG_FILE"
+  find "$deb_file" -maxdepth 0 -printf "%s bytes %p\n" | tee -a "$LOG_FILE"
   echo ""
   echo "HINWEIS: /etc/postfix ist NICHT im Paket."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
   echo ""
-  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  local repo_script
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
   if [ -x "$repo_script" ]; then
     log "Aktualisiere lokales Repository..."
     "$repo_script" update || true
@@ -525,7 +520,7 @@ verify_build() {
 # ------------------------------------------------------------------------------
 install_packages() {
   local deb_file
-  deb_file=$(ls "$PACKAGE_DIR"/postfix-custom_*.deb 2>/dev/null | sort -V | tail -1 || true)
+  deb_file=$(find "$PACKAGE_DIR" -maxdepth 1 -name "postfix-custom_*.deb" 2>/dev/null | sort -V | tail -1 || true)
   [ -n "$deb_file" ] || die "Kein postfix-custom.deb in $PACKAGE_DIR – bitte zuerst: $0 package"
 
   # Sicherheitscheck: /etc/postfix muss vorhanden sein
@@ -680,7 +675,7 @@ status_cmd() {
   echo ""
   echo "--- Verfügbare .deb-Pakete ---"
   if [ -d "$PACKAGE_DIR" ]; then
-    ls -lh "$PACKAGE_DIR"/*.deb 2>/dev/null || echo "(keine Pakete erzeugt)"
+    find "$PACKAGE_DIR" -maxdepth 1 -name "*.deb" -printf "%s bytes %p\n" 2>/dev/null || echo "(keine Pakete erzeugt)"
   fi
 }
 
@@ -718,7 +713,8 @@ package_all() {
   create_deb_package
   log "=== Paket-Build abgeschlossen ==="
   echo ""
-  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  local repo_script
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
   if [ -x "$repo_script" ]; then
     log "Aktualisiere lokales Repository..."
     "$repo_script" update || true
@@ -753,10 +749,22 @@ install_all() {
 # Main
 # ------------------------------------------------------------------------------
 check_os_arch() {
-  local os_id=$(grep "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
-  local os_version_id=$(grep "^VERSION_ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
-  local os_major_version=$(echo "$os_version_id" | cut -d. -f1)
-  local arch=$(dpkg --print-architecture)
+  local os_id
+  local os_version_id
+  local os_major_version
+  local arch
+
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    os_id="${ID:-}"
+    os_version_id="${VERSION_ID:-}"
+  else
+    os_id="unknown"
+    os_version_id="unknown"
+  fi
+
+  os_major_version=$(echo "$os_version_id" | cut -d. -f1)
+  arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
   if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
     echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2

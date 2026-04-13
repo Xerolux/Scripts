@@ -346,7 +346,12 @@ build_pigeonhole() {
   # Lösung: alle .la-Dateien im Staging patchen: /usr/lib/ → Staging-Pfad
   log "Patche .la-Dateien im Staging (libtool hardcoded paths)"
   find "$STAGE_DOVECOT" -name "*.la" | while read -r la_file; do
-    sed -i       -e "s|libdir='/usr/lib/dovecot'|libdir='${staging_lib}/dovecot'|g"       -e "s|libdir="/usr/lib/dovecot"|libdir="${staging_lib}/dovecot"|g"       -e "s| /usr/lib/dovecot/lib| ${staging_lib}/dovecot/lib|g"       -e "s|'/usr/lib/dovecot/lib|'${staging_lib}/dovecot/lib|g"       "$la_file"
+    sed -i \
+      -e "s|libdir='/usr/lib/dovecot'|libdir='${staging_lib}/dovecot'|g" \
+      -e "s|libdir=\"/usr/lib/dovecot\"|libdir=\"${staging_lib}/dovecot\"|g" \
+      -e "s| /usr/lib/dovecot/lib| ${staging_lib}/dovecot/lib|g" \
+      -e "s|'/usr/lib/dovecot/lib|'${staging_lib}/dovecot/lib|g" \
+      "$la_file"
   done
   log ".la-Dateien gepatcht: $(find "$STAGE_DOVECOT" -name "*.la" | wc -l) Dateien"
 
@@ -376,7 +381,9 @@ build_pigeonhole() {
 
   if [ -n "$settings_hist_py" ]; then
     log "settings-history.py: $settings_hist_py"
-    find "$BUILD_ROOT/pigeonhole" -name "Makefile"       | xargs grep -l "settings-history.py" 2>/dev/null       | while read -r mk; do
+    find "$BUILD_ROOT/pigeonhole" -name "Makefile" -print0 \
+      | xargs -0 grep -l "settings-history.py" 2>/dev/null \
+      | while read -r mk; do
           sed -i "s|^SETTINGS_HISTORY_PY = .*|SETTINGS_HISTORY_PY = ${settings_hist_py}|" "$mk"
           log "Gepatch: $mk"
         done
@@ -525,7 +532,7 @@ POSTRM
   [ -d "$STAGE_PIGEONHOLE" ] || die "Pigeonhole-Staging fehlt – zuerst 'package' ausführen"
 
   # /etc aus Staging entfernen
-  rm -rf "${STAGE_PIGEONHOLE}/etc"
+  rm -rf "${STAGE_PIGEONHOLE:?}/etc"
 
   log "Pigeonhole Staging-Inhalt:"
   find "$STAGE_PIGEONHOLE" \( -name "*.so" -o -name "*sieve*" -o -name "*managesieve*" \) \
@@ -575,12 +582,13 @@ POSTRM
   # ---- Abschlussmeldung ------------------------------------------------------
   echo ""
   log "===== Fertige Pakete ====="
-  ls -lh "$PACKAGE_DIR"/*.deb | tee -a "$LOG_FILE"
+  find "$PACKAGE_DIR" -maxdepth 1 -name "*.deb" -printf "%s bytes %p\n" | tee -a "$LOG_FILE"
   echo ""
   echo "HINWEIS: /etc/dovecot ist NICHT in den Paketen."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
   echo ""
-  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  local repo_script
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
   if [ -x "$repo_script" ]; then
     log "Aktualisiere lokales Repository..."
     "$repo_script" update || true
@@ -613,8 +621,8 @@ POSTRM
 install_packages() {
   local deb_core deb_sieve
 
-  deb_core=$(ls "$PACKAGE_DIR"/dovecot-core-custom_*.deb 2>/dev/null | sort -V | tail -1 || true)
-  deb_sieve=$(ls "$PACKAGE_DIR"/dovecot-pigeonhole-custom_*.deb 2>/dev/null | sort -V | tail -1 || true)
+  deb_core=$(find "$PACKAGE_DIR" -maxdepth 1 -name "dovecot-core-custom_*.deb" 2>/dev/null | sort -V | tail -1 || true)
+  deb_sieve=$(find "$PACKAGE_DIR" -maxdepth 1 -name "dovecot-pigeonhole-custom_*.deb" 2>/dev/null | sort -V | tail -1 || true)
 
   [ -n "$deb_core" ]  || die "Kein dovecot-core-custom.deb in $PACKAGE_DIR – bitte zuerst: $0 package"
   [ -n "$deb_sieve" ] || die "Kein dovecot-pigeonhole-custom.deb in $PACKAGE_DIR – bitte zuerst: $0 package"
@@ -1009,7 +1017,8 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
   echo ""
   log "=== Dovecot-Core Paket-Build abgeschlossen ==="
   echo "Paket: $deb_core"
-  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  local repo_script
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
   if [ -x "$repo_script" ]; then
     log "Aktualisiere lokales Repository..."
     "$repo_script" update || true
@@ -1069,7 +1078,7 @@ package_pigeonhole() {
 
   log "Prüfe Pigeonhole-Staging"
   [ -d "$STAGE_PIGEONHOLE" ] || die "Pigeonhole-Staging fehlt nach build_pigeonhole"
-  rm -rf "${STAGE_PIGEONHOLE}/etc"
+  rm -rf "${STAGE_PIGEONHOLE:?}/etc"
 
   log "Pigeonhole Staging-Inhalt:"
   find "$STAGE_PIGEONHOLE" \( -name "*.so" -o -name "*sieve*" -o -name "*managesieve*" \)     | sort | tee -a "$LOG_FILE"
@@ -1097,7 +1106,8 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
   echo ""
   log "=== Pigeonhole Paket-Build abgeschlossen ==="
   echo "Paket: $deb_sieve"
-  local repo_script="$(dirname "$0")/setup_local_repo.sh"
+  local repo_script
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
   if [ -x "$repo_script" ]; then
     log "Aktualisiere lokales Repository..."
     "$repo_script" update || true
@@ -1153,10 +1163,22 @@ install_all() {
 # Main
 # ------------------------------------------------------------------------------
 check_os_arch() {
-  local os_id=$(grep "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
-  local os_version_id=$(grep "^VERSION_ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
-  local os_major_version=$(echo "$os_version_id" | cut -d. -f1)
-  local arch=$(dpkg --print-architecture)
+  local os_id
+  local os_version_id
+  local os_major_version
+  local arch
+
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    os_id="${ID:-}"
+    os_version_id="${VERSION_ID:-}"
+  else
+    os_id="unknown"
+    os_version_id="unknown"
+  fi
+
+  os_major_version=$(echo "$os_version_id" | cut -d. -f1)
+  arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
   if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
     echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
