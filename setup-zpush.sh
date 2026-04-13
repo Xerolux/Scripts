@@ -51,6 +51,37 @@ trap rollback ERR
 [[ $EUID -eq 0 ]] || fail "Bitte als root ausführen."
 
 ############################################
+# Package Check / Install
+############################################
+
+ensure_zpush_packages() {
+  local required_packages=(
+    "z-push-common"
+    "z-push-backend-imap"
+    "z-push-ipc-sharedmemory"
+  )
+  local missing_packages=()
+  local pkg
+
+  for pkg in "${required_packages[@]}"; do
+    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+      missing_packages+=("$pkg")
+    fi
+  done
+
+  if (( ${#missing_packages[@]} > 0 )); then
+    log "Installiere fehlende Z-Push Pakete: ${missing_packages[*]}"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y "${missing_packages[@]}"
+  else
+    log "Alle Z-Push Pakete bereits installiert"
+  fi
+}
+
+ensure_zpush_packages
+
+############################################
 # Backup
 ############################################
 
@@ -119,14 +150,63 @@ echo "Spam:   $SPAM"
 
 log "Z-Push konfigurieren"
 
-sed -i "s|IMAP_SERVER.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" /etc/z-push/imap.conf.php
-sed -i "s|IMAP_PORT.*|define('IMAP_PORT', 993);|g" /etc/z-push/imap.conf.php
-sed -i "s|IMAP_OPTIONS.*|define('IMAP_OPTIONS', '/ssl');|g" /etc/z-push/imap.conf.php
+ensure_zpush_installed() {
+  [[ -f "/usr/share/z-push/index.php" ]] && return 0
+  fail "Z-Push scheint nicht installiert zu sein (/usr/share/z-push/index.php fehlt). Installiere z.B.: apt install -y z-push-common z-push-backend-imap"
+}
 
-sed -i "s|IMAP_SENTFOLDER.*|define('IMAP_SENTFOLDER', '${SENT}');|g" /etc/z-push/imap.conf.php
-sed -i "s|IMAP_DRAFTSFOLDER.*|define('IMAP_DRAFTSFOLDER', '${DRAFTS}');|g" /etc/z-push/imap.conf.php
-sed -i "s|IMAP_TRASHFOLDER.*|define('IMAP_TRASHFOLDER', '${TRASH}');|g" /etc/z-push/imap.conf.php
-sed -i "s|IMAP_SPAMFOLDER.*|define('IMAP_SPAMFOLDER', '${SPAM}');|g" /etc/z-push/imap.conf.php
+bootstrap_imap_conf() {
+  local src_candidates=(
+    "/usr/share/z-push/backend/imap/config.php"
+    "/usr/share/z-push/backend/imap/config.php.default"
+    "/usr/share/z-push/backend/imap/config.php.dist"
+    "/usr/share/z-push/backend/imap/config.php.sample"
+  )
+  local src
+  mkdir -p "/etc/z-push"
+  for src in "${src_candidates[@]}"; do
+    if [[ -f "$src" ]]; then
+      cp -a "$src" "/etc/z-push/imap.conf.php"
+      return 0
+    fi
+  done
+  return 1
+}
+
+detect_imap_conf() {
+  local candidates=(
+    "/etc/z-push/imap.conf.php"
+    "/etc/z-push/backend/imap/config.php"
+    "/usr/share/z-push/backend/imap/config.php"
+  )
+  local p
+  for p in "${candidates[@]}"; do
+    if [[ -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_zpush_installed
+IMAP_CONF="$(detect_imap_conf || true)"
+if [[ -z "${IMAP_CONF}" ]]; then
+  log "IMAP Config fehlt - versuche /etc/z-push/imap.conf.php aus Template zu erzeugen"
+  bootstrap_imap_conf || fail "Keine IMAP Config gefunden und kein Template verfügbar. Prüfe Paket z-push-backend-imap."
+  IMAP_CONF="$(detect_imap_conf || true)"
+fi
+[[ -n "${IMAP_CONF}" ]] || fail "Keine IMAP Config gefunden. Prüfe Paket z-push-backend-imap und Pfade unter /etc/z-push bzw. /usr/share/z-push."
+log "IMAP Config: ${IMAP_CONF}"
+
+sed -i "s|IMAP_SERVER.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" "${IMAP_CONF}"
+sed -i "s|IMAP_PORT.*|define('IMAP_PORT', 993);|g" "${IMAP_CONF}"
+sed -i "s|IMAP_OPTIONS.*|define('IMAP_OPTIONS', '/ssl');|g" "${IMAP_CONF}"
+
+sed -i "s|IMAP_SENTFOLDER.*|define('IMAP_SENTFOLDER', '${SENT}');|g" "${IMAP_CONF}"
+sed -i "s|IMAP_DRAFTSFOLDER.*|define('IMAP_DRAFTSFOLDER', '${DRAFTS}');|g" "${IMAP_CONF}"
+sed -i "s|IMAP_TRASHFOLDER.*|define('IMAP_TRASHFOLDER', '${TRASH}');|g" "${IMAP_CONF}"
+sed -i "s|IMAP_SPAMFOLDER.*|define('IMAP_SPAMFOLDER', '${SPAM}');|g" "${IMAP_CONF}"
 
 ############################################
 # Nginx Config (Temp)
