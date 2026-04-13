@@ -243,6 +243,7 @@ build_dovecot() {
   #   --with-cassandra       Nur für sehr große Deployments
   #   --enable-doveadm-http  REST-API, kein Bedarf in dieser Umgebung
   ./configure \
+    systemdsystemunitdir=/lib/systemd/system \
     --enable-maintainer-mode \
     --prefix="$PREFIX" \
     --sysconfdir="$SYSCONFDIR" \
@@ -266,7 +267,6 @@ build_dovecot() {
     --with-exttextcat \
     --with-unwind \
     --with-systemd \
-    --with-systemdsystemunitdir=/lib/systemd/system \
     --with-zlib \
     --with-bzlib \
     --with-lzma \

@@ -28,8 +28,9 @@ fi
 source "setup_postfix.env"
 
 POSTFIX_TARBALL="https://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
-# Spiegel-Fallback
+# Spiegel-Fallbacks (HTTPS bevorzugt)
 POSTFIX_TARBALL_MIRROR="https://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
+POSTFIX_TARBALL_ALT1="https://fossies.org/linux/misc/postfix-${POSTFIX_VERSION}.tar.gz"
 
 # Installationspfade (passend zu bestehender ISPConfig-Installation)
 # Diese werden in der Funktion create_deb_package direkt verwendet
@@ -151,10 +152,21 @@ prepare_sources() {
 
   if [ ! -f "$pf_tar" ]; then
     log "Lade Postfix $POSTFIX_VERSION Tarball"
-    wget -q --show-progress "$POSTFIX_TARBALL" -O "$pf_tar" \
-      || curl -L --progress-bar "$POSTFIX_TARBALL" -o "$pf_tar" \
-      || wget -q --show-progress "$POSTFIX_TARBALL_MIRROR" -O "$pf_tar" \
-      || die "Download fehlgeschlagen"
+    local url
+    local urls=(
+      "$POSTFIX_TARBALL"
+      "$POSTFIX_TARBALL_MIRROR"
+      "$POSTFIX_TARBALL_ALT1"
+    )
+    local downloaded=0
+    for url in "${urls[@]}"; do
+      log "Versuche Download: $url"
+      if curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --progress-bar "$url" -o "$pf_tar"; then
+        downloaded=1
+        break
+      fi
+    done
+    (( downloaded == 1 )) || die "Download fehlgeschlagen"
   else
     log "Postfix Tarball bereits vorhanden: $pf_tar"
   fi
