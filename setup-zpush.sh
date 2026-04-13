@@ -253,16 +253,19 @@ fi
 log "Z-Push Hauptconfig: ${MAIN_ZPUSH_CONF}"
 log "IMAP Config: ${IMAP_CONF}"
 
-sed -i "s|BACKEND_PROVIDER.*|define('BACKEND_PROVIDER', 'BackendIMAP');|g" "${MAIN_ZPUSH_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('BACKEND_PROVIDER'.*|define('BACKEND_PROVIDER', 'BackendIMAP');|g" "${MAIN_ZPUSH_CONF}"
 
-sed -i "s|IMAP_SERVER.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" "${IMAP_CONF}"
-sed -i "s|IMAP_PORT.*|define('IMAP_PORT', 993);|g" "${IMAP_CONF}"
-sed -i "s|IMAP_OPTIONS.*|define('IMAP_OPTIONS', '/ssl');|g" "${IMAP_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('IMAP_SERVER'.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" "${IMAP_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('IMAP_PORT'.*|define('IMAP_PORT', 993);|g" "${IMAP_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('IMAP_OPTIONS'.*|define('IMAP_OPTIONS', '/ssl');|g" "${IMAP_CONF}"
 
-sed -i "s|IMAP_SENTFOLDER.*|define('IMAP_SENTFOLDER', '${SENT}');|g" "${IMAP_CONF}"
-sed -i "s|IMAP_DRAFTSFOLDER.*|define('IMAP_DRAFTSFOLDER', '${DRAFTS}');|g" "${IMAP_CONF}"
-sed -i "s|IMAP_TRASHFOLDER.*|define('IMAP_TRASHFOLDER', '${TRASH}');|g" "${IMAP_CONF}"
-sed -i "s|IMAP_SPAMFOLDER.*|define('IMAP_SPAMFOLDER', '${SPAM}');|g" "${IMAP_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('IMAP_SENTFOLDER'.*|define('IMAP_SENTFOLDER', '${SENT}');|g" "${IMAP_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('IMAP_DRAFTSFOLDER'.*|define('IMAP_DRAFTSFOLDER', '${DRAFTS}');|g" "${IMAP_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('IMAP_TRASHFOLDER'.*|define('IMAP_TRASHFOLDER', '${TRASH}');|g" "${IMAP_CONF}"
+sed -i -E "s|^[[:space:]]*define\\('IMAP_SPAMFOLDER'.*|define('IMAP_SPAMFOLDER', '${SPAM}');|g" "${IMAP_CONF}"
+
+php -l "${MAIN_ZPUSH_CONF}" >/dev/null || fail "Z-Push Hauptconfig hat Syntaxfehler: ${MAIN_ZPUSH_CONF}"
+php -l "${IMAP_CONF}" >/dev/null || fail "Z-Push IMAP Config hat Syntaxfehler: ${IMAP_CONF}"
 
 ############################################
 # Nginx Config (Temp)
