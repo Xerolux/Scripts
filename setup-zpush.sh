@@ -64,7 +64,7 @@ install_zpush_from_github_release() {
 
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y curl tar
+  apt-get install -y curl tar php-fpm php-imap php-mbstring php-curl php-xml php-soap php-intl
 
   curl -fsSL "$archive_url" -o "$archive_path"
   rm -rf "$extract_dir"
@@ -191,6 +191,21 @@ ensure_zpush_installed() {
   fail "Z-Push scheint nicht installiert zu sein (/usr/share/z-push/index.php fehlt). Installiere z.B.: apt install -y z-push-common z-push-backend-imap"
 }
 
+detect_main_zpush_conf() {
+  local candidates=(
+    "/etc/z-push/z-push.conf.php"
+    "/usr/share/z-push/config.php"
+  )
+  local p
+  for p in "${candidates[@]}"; do
+    if [[ -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
 bootstrap_imap_conf() {
   local src_candidates=(
     "/usr/share/z-push/backend/imap/config.php"
@@ -226,6 +241,8 @@ detect_imap_conf() {
 }
 
 ensure_zpush_installed
+MAIN_ZPUSH_CONF="$(detect_main_zpush_conf || true)"
+[[ -n "${MAIN_ZPUSH_CONF}" ]] || fail "Keine Z-Push Hauptconfig gefunden (/etc/z-push/z-push.conf.php oder /usr/share/z-push/config.php)."
 IMAP_CONF="$(detect_imap_conf || true)"
 if [[ -z "${IMAP_CONF}" ]]; then
   log "IMAP Config fehlt - versuche /etc/z-push/imap.conf.php aus Template zu erzeugen"
@@ -233,7 +250,10 @@ if [[ -z "${IMAP_CONF}" ]]; then
   IMAP_CONF="$(detect_imap_conf || true)"
 fi
 [[ -n "${IMAP_CONF}" ]] || fail "Keine IMAP Config gefunden. Prüfe Paket z-push-backend-imap und Pfade unter /etc/z-push bzw. /usr/share/z-push."
+log "Z-Push Hauptconfig: ${MAIN_ZPUSH_CONF}"
 log "IMAP Config: ${IMAP_CONF}"
+
+sed -i "s|BACKEND_PROVIDER.*|define('BACKEND_PROVIDER', 'BackendIMAP');|g" "${MAIN_ZPUSH_CONF}"
 
 sed -i "s|IMAP_SERVER.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" "${IMAP_CONF}"
 sed -i "s|IMAP_PORT.*|define('IMAP_PORT', 993);|g" "${IMAP_CONF}"
@@ -320,7 +340,13 @@ fi
 
 log "Teste ActiveSync Endpoint"
 
-curl -k -I https://"${PUSH_DOMAIN}"/Microsoft-Server-ActiveSync || warn "HTTP FAIL"
+HTTP_CODE="$(curl -k -sS -o /tmp/zpush-endpoint-check.out -w "%{http_code}" https://"${PUSH_DOMAIN}"/Microsoft-Server-ActiveSync || true)"
+echo "HTTP Status: ${HTTP_CODE}"
+if [[ -z "${HTTP_CODE}" || "${HTTP_CODE}" == "000" ]]; then
+  warn "HTTP FAIL (keine Antwort)"
+elif [[ "${HTTP_CODE}" =~ ^5 ]]; then
+  warn "ActiveSync liefert HTTP ${HTTP_CODE} (Serverfehler). Prüfe /var/log/nginx/error.log und PHP-FPM Logs."
+fi
 
 ############################################
 # DONE
