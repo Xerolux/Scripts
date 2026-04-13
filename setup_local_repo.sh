@@ -26,10 +26,22 @@ require_root() {
 }
 
 check_os_arch() {
-  local os_id=$(grep "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
-  local os_version_id=$(grep "^VERSION_ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
-  local os_major_version=$(echo "$os_version_id" | cut -d. -f1)
-  local arch=$(dpkg --print-architecture)
+  local os_id
+  local os_version_id
+  local os_major_version
+  local arch
+
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    os_id="${ID:-}"
+    os_version_id="${VERSION_ID:-}"
+  else
+    os_id="unknown"
+    os_version_id="unknown"
+  fi
+
+  os_major_version=$(echo "$os_version_id" | cut -d. -f1)
+  arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
   if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
     echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
@@ -148,7 +160,7 @@ status_repo() {
   local list_file="/etc/apt/sources.list.d/local-mail-repo.list"
   if [ -f "$list_file" ]; then
     echo "  [OK] apt sources list existiert: $list_file"
-    cat "$list_file" | sed 's/^/       /'
+    sed 's/^/       /' < "$list_file"
   else
     echo "  [--] apt sources list nicht gefunden ($list_file)"
   fi
@@ -157,7 +169,11 @@ status_repo() {
   if [ -d "$REPO_DIR" ]; then
     echo "  [OK] Repository-Verzeichnis existiert: $REPO_DIR"
     echo "       Pakete im Repository:"
-    ls -lh "$REPO_DIR"/*.deb 2>/dev/null | awk '{print "       - "$9}' || echo "       (keine Pakete)"
+    if find "$REPO_DIR" -maxdepth 1 -name "*.deb" -print -quit | grep -q .; then
+      find "$REPO_DIR" -maxdepth 1 -name "*.deb" -exec basename {} \; | awk '{print "       - "$1}'
+    else
+      echo "       (keine Pakete)"
+    fi
   else
     echo "  [--] Repository-Verzeichnis nicht gefunden ($REPO_DIR)"
   fi

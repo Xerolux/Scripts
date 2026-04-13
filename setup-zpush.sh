@@ -196,12 +196,15 @@ systemctl reload nginx
 
 log "Teste IMAPS Verbindung"
 
-timeout 10 bash -c "echo | openssl s_client -connect ${MAIL_HOST}:993 -servername ${MAIL_HOST}" >/dev/null 2>&1 \
-  && echo "IMAP OK" || warn "IMAP FAIL"
+if timeout 10 bash -c "echo | openssl s_client -connect ${MAIL_HOST}:993 -servername ${MAIL_HOST}" >/dev/null 2>&1; then
+  echo "IMAP OK"
+else
+  warn "IMAP FAIL"
+fi
 
 log "Teste ActiveSync Endpoint"
 
-curl -k -I https://${PUSH_DOMAIN}/Microsoft-Server-ActiveSync || warn "HTTP FAIL"
+curl -k -I https://"${PUSH_DOMAIN}"/Microsoft-Server-ActiveSync || warn "HTTP FAIL"
 
 ############################################
 # DONE

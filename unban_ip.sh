@@ -229,7 +229,7 @@ show_bans() {
       # Header überspringen falls vorhanden, ansonsten zählen
       # cscli raw output ist oft: id,source,ip_text,...
       # wir filtern auf einfache IP Liste
-      local ips; ips="$(echo "$raw" | awk -F',' 'NR>1 {print $3}')"
+      local ips; ips="$(echo "$raw" | awk -F',' 'NR>1 {sub(/^Ip:/, "", $3); print $3}')"
       if [[ -n "$ips" ]]; then
          while IFS= read -r line; do
            echo "  - $line"
@@ -356,7 +356,7 @@ main() {
       ;;
     unban)
       # Fallunterscheidung: Ist es eine IP oder eine Domain?
-      if [[ ! "$UNBAN_ARG" =~ :|^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$|/ ]]; then
+      if [[ ! "$UNBAN_ARG" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ ! "$UNBAN_ARG" =~ : ]] && [[ ! "$UNBAN_ARG" =~ / ]]; then
          # Sieht aus wie eine Domain -> Auflösen
          mapfile -t targets < <(build_targets_for_domain "$UNBAN_ARG" "$V6_PLEN")
          # Wenn man explizit --unban domain.com macht, sollte man vielleicht 
