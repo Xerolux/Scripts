@@ -117,7 +117,7 @@ install_build_deps() {
     libssl-dev \
     libsasl2-dev \
     libmariadb-dev \
-    libldap2-dev liblber2-dev \
+    libldap2-dev \
     libpcre2-dev \
     libpcre3-dev \
     libsqlite3-dev \

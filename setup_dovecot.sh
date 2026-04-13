@@ -124,6 +124,7 @@ install_build_deps() {
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential autoconf automake libtool pkg-config gettext make git \
+    wget curl \
     libssl-dev \
     libbz2-dev \
     zlib1g-dev \
@@ -265,6 +266,7 @@ build_dovecot() {
     --with-exttextcat \
     --with-unwind \
     --with-systemd \
+    --with-systemdsystemunitdir=/lib/systemd/system \
     --with-zlib \
     --with-bzlib \
     --with-lzma \
