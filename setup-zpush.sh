@@ -253,7 +253,7 @@ fi
 log "Z-Push Hauptconfig: ${MAIN_ZPUSH_CONF}"
 log "IMAP Config: ${IMAP_CONF}"
 
-sed -i -E "s|^[[:space:]]*define\\('BACKEND_PROVIDER'.*|define('BACKEND_PROVIDER', 'BackendIMAP');|g" "${MAIN_ZPUSH_CONF}"
+sed -i -E "s|^.*BACKEND_PROVIDER.*$|define('BACKEND_PROVIDER', 'BackendIMAP');|g" "${MAIN_ZPUSH_CONF}"
 
 sed -i -E "s|^[[:space:]]*define\\('IMAP_SERVER'.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" "${IMAP_CONF}"
 sed -i -E "s|^[[:space:]]*define\\('IMAP_PORT'.*|define('IMAP_PORT', 993);|g" "${IMAP_CONF}"
