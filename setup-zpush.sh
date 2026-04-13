@@ -54,6 +54,34 @@ trap rollback ERR
 # Package Check / Install
 ############################################
 
+install_zpush_from_github_release() {
+  local zpush_version="${ZPUSH_VERSION:-2.7.6}"
+  local archive_url="https://github.com/Z-Hub/Z-Push/archive/refs/tags/${zpush_version}.tar.gz"
+  local archive_path="/tmp/zpush-${zpush_version}.tar.gz"
+  local extract_dir="/tmp/Z-Push-${zpush_version}"
+
+  log "Installiere Z-Push aus GitHub Release ${zpush_version} (Fallback)"
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y curl tar
+
+  curl -fsSL "$archive_url" -o "$archive_path"
+  rm -rf "$extract_dir"
+  tar -xzf "$archive_path" -C /tmp
+
+  [[ -d "$extract_dir/src" ]] || fail "Z-Push Release enthält kein src-Verzeichnis: ${extract_dir}/src"
+
+  mkdir -p /usr/share/z-push
+  cp -a "$extract_dir/src/." /usr/share/z-push/
+
+  mkdir -p /etc/z-push
+  [[ -f "/etc/z-push/z-push.conf.php" ]] || cp -a /usr/share/z-push/config.php /etc/z-push/z-push.conf.php
+  [[ -f "/etc/z-push/imap.conf.php" ]] || cp -a /usr/share/z-push/backend/imap/config.php /etc/z-push/imap.conf.php
+
+  [[ -f "/usr/share/z-push/index.php" ]] || fail "Fallback-Installation unvollständig: /usr/share/z-push/index.php fehlt"
+}
+
 ensure_zpush_packages() {
   local required_packages=(
     "z-push-common"
@@ -62,6 +90,11 @@ ensure_zpush_packages() {
   )
   local missing_packages=()
   local pkg
+
+  if [[ -f "/usr/share/z-push/index.php" && -f "/usr/share/z-push/backend/imap/config.php" ]]; then
+    log "Z-Push Dateien bereits vorhanden"
+    return 0
+  fi
 
   for pkg in "${required_packages[@]}"; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
@@ -73,7 +106,10 @@ ensure_zpush_packages() {
     log "Installiere fehlende Z-Push Pakete: ${missing_packages[*]}"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y "${missing_packages[@]}"
+    if ! apt-get install -y "${missing_packages[@]}"; then
+      warn "APT-Installation fehlgeschlagen (z.B. auf Ubuntu Noble ohne Z-Push-Pakete). Nutze GitHub-Fallback."
+      install_zpush_from_github_release
+    fi
   else
     log "Alle Z-Push Pakete bereits installiert"
   fi
