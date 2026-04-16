@@ -63,7 +63,7 @@ install_zpush_from_github_release() {
   log "Installiere Z-Push aus GitHub Release ${zpush_version} (Fallback)"
 
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
+  apt-get update -qq
   apt-get install -y curl tar php-fpm php-imap php-mbstring php-curl php-xml php-soap php-intl
 
   curl -fsSL "$archive_url" -o "$archive_path"
@@ -138,7 +138,7 @@ detect_php_sock() {
     return
   fi
 
-  find /run/php -name "php*-fpm.sock" | sort -V | tail -n1
+  find /run/php -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n1
 }
 
 PHP_SOCK="$(detect_php_sock)"
@@ -150,7 +150,7 @@ log "PHP Socket: $PHP_SOCK"
 # SSL Detection
 ############################################
 
-SSL_BASE="$(find /etc/letsencrypt/live -type d | grep "$SSL_SEARCH_DOMAIN" | head -n1)"
+SSL_BASE="$(find /etc/letsencrypt/live -type d 2>/dev/null | grep "$SSL_SEARCH_DOMAIN" | head -n1)"
 [[ -d "$SSL_BASE" ]] || fail "Kein Zertifikat gefunden"
 
 log "SSL Path: $SSL_BASE"

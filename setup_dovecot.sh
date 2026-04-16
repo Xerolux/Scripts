@@ -602,9 +602,6 @@ POSTRM
 
 # ------------------------------------------------------------------------------
 # Pakete via dpkg installieren
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Pakete via dpkg installieren
 #
 # WAS PASSIERT MIT /etc/dovecot:
 #   Die .deb-Pakete enthalten /etc/dovecot NICHT (wurde beim Bauen entfernt).
@@ -715,7 +712,7 @@ verify_modules() {
   # IMAP IDLE (Push) – prüfe inotify-Support im Kernel
   echo ""
   echo " IMAP IDLE / Push:"
-  if grep -q "inotify" /proc/sys/fs/inotify/max_user_watches 2>/dev/null ||      [ -f /proc/sys/fs/inotify/max_user_watches ]; then
+  if [ -f /proc/sys/fs/inotify/max_user_watches ]; then
     echo "  [OK] inotify verfügbar (IMAP IDLE funktioniert)"
     echo "       max_user_watches: $(cat /proc/sys/fs/inotify/max_user_watches)"
     echo "       Empfehlung: mind. 65536 (sysctl fs.inotify.max_user_watches=65536)"
@@ -1011,10 +1008,37 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
   chmod 755 "$postinst" "$postrm"
 
   local deb_core="$PACKAGE_DIR/dovecot-core-custom_${DOVECOT_VERSION}_${arch}.deb"
-  fpm     --input-type   dir     --output-type  deb     --name         dovecot-core-custom     --version      "$DOVECOT_VERSION"     --iteration    1     --architecture "$arch"     --maintainer   "local build <root@localhost>"     --description  "Dovecot IMAP/POP3 $DOVECOT_VERSION – custom build (ISPConfig/MariaDB/Sieve)"     --depends      libssl3     --depends      libmariadb3     --depends      libpam0g     --depends      libicu74     --depends      libsodium23     --depends      "liblua5.4-0 | liblua5.3-0"     --conflicts    dovecot-core     --provides     dovecot-core     --replaces     dovecot-core     --deb-no-default-config-files     --after-install  "$postinst"     --after-remove   "$postrm"     --force     --package      "$deb_core"     --chdir        "$STAGE_DOVECOT"     .
+  fpm \
+    --input-type   dir \
+    --output-type  deb \
+    --name         dovecot-core-custom \
+    --version      "$DOVECOT_VERSION" \
+    --iteration    1 \
+    --architecture "$arch" \
+    --maintainer   "local build <root@localhost>" \
+    --description  "Dovecot IMAP/POP3 $DOVECOT_VERSION – custom build (ISPConfig/MariaDB/Sieve)" \
+    --depends      libssl3 \
+    --depends      libmariadb3 \
+    --depends      libpam0g \
+    --depends      libicu74 \
+    --depends      libsodium23 \
+    --depends      "liblua5.4-0 | liblua5.3-0" \
+    --conflicts    dovecot-core \
+    --provides     dovecot-core \
+    --replaces     dovecot-core \
+    --deb-no-default-config-files \
+    --after-install  "$postinst" \
+    --after-remove   "$postrm" \
+    --force \
+    --package      "$deb_core" \
+    --chdir        "$STAGE_DOVECOT" \
+    .
 
   log "Erzeugt: $(basename "$deb_core") ($(du -sh "$deb_core" | cut -f1))"
-  dpkg-deb --contents "$deb_core" | awk '{print $NF}'     | grep -E "(sbin/dovecot$|bin/doveadm|\.so|dovecot\.service|dovecot-config)"     | sort | tee -a "$LOG_FILE" || true
+  dpkg-deb --contents "$deb_core" \
+    | awk '{print $NF}' \
+    | grep -E "(sbin/dovecot$|bin/doveadm|\.so|dovecot\.service|dovecot-config)" \
+    | sort | tee -a "$LOG_FILE" || true
 
   echo ""
   log "=== Dovecot-Core Paket-Build abgeschlossen ==="
@@ -1100,10 +1124,35 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
   chmod 755 "$postinst" "$postrm"
 
   local deb_sieve="$PACKAGE_DIR/dovecot-pigeonhole-custom_${PIGEONHOLE_VERSION}_${arch}.deb"
-  fpm     --input-type   dir     --output-type  deb     --name         dovecot-pigeonhole-custom     --version      "$PIGEONHOLE_VERSION"     --iteration    1     --architecture "$arch"     --maintainer   "local build <root@localhost>"     --description  "Dovecot Pigeonhole/Sieve $PIGEONHOLE_VERSION – custom build"     --depends      dovecot-core-custom     --conflicts    dovecot-sieve     --conflicts    dovecot-managesieved     --provides     dovecot-sieve     --provides     dovecot-managesieved     --replaces     dovecot-sieve     --replaces     dovecot-managesieved     --deb-no-default-config-files     --after-install  "$postinst"     --after-remove   "$postrm"     --force     --package      "$deb_sieve"     --chdir        "$STAGE_PIGEONHOLE"     .
+  fpm \
+    --input-type   dir \
+    --output-type  deb \
+    --name         dovecot-pigeonhole-custom \
+    --version      "$PIGEONHOLE_VERSION" \
+    --iteration    1 \
+    --architecture "$arch" \
+    --maintainer   "local build <root@localhost>" \
+    --description  "Dovecot Pigeonhole/Sieve $PIGEONHOLE_VERSION – custom build" \
+    --depends      dovecot-core-custom \
+    --conflicts    dovecot-sieve \
+    --conflicts    dovecot-managesieved \
+    --provides     dovecot-sieve \
+    --provides     dovecot-managesieved \
+    --replaces     dovecot-sieve \
+    --replaces     dovecot-managesieved \
+    --deb-no-default-config-files \
+    --after-install  "$postinst" \
+    --after-remove   "$postrm" \
+    --force \
+    --package      "$deb_sieve" \
+    --chdir        "$STAGE_PIGEONHOLE" \
+    .
 
   log "Erzeugt: $(basename "$deb_sieve") ($(du -sh "$deb_sieve" | cut -f1))"
-  dpkg-deb --contents "$deb_sieve" | awk '{print $NF}'     | grep -E "(\.so|sieve|managesieve)" | sort | tee -a "$LOG_FILE" || true
+  dpkg-deb --contents "$deb_sieve" \
+    | awk '{print $NF}' \
+    | grep -E "(\.so|sieve|managesieve)" \
+    | sort | tee -a "$LOG_FILE" || true
 
   echo ""
   log "=== Pigeonhole Paket-Build abgeschlossen ==="
