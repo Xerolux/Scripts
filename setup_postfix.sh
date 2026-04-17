@@ -37,7 +37,7 @@ POSTFIX_TARBALL_ALT1="https://fossies.org/linux/misc/postfix-${POSTFIX_VERSION}.
 # ------------------------------------------------------------------------------
 # Hilfsfunktionen
 # ------------------------------------------------------------------------------
-log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
+log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE" >&2; }
 die()  { log "FEHLER: $*"; exit 1; }
 
 require_root() {
