@@ -124,7 +124,7 @@ install_build_deps() {
 
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    build-essential make m4 \
+    build-essential make m4 pkg-config \
     libssl-dev \
     libsasl2-dev \
     libmariadb-dev \
@@ -262,7 +262,7 @@ build_ccargs() {
   # --- PCRE2 – für header_checks, body_checks --------------------------------
   if pkg-config --exists libpcre2-8 2>/dev/null; then
     log "  [+] PCRE2"
-    CCARGS="$CCARGS -DHAS_PCRE -DHAS_PCRE2 $(pkg-config --cflags libpcre2-8)"
+    CCARGS="$CCARGS -DHAS_PCRE2 $(pkg-config --cflags libpcre2-8)"
     AUXLIBS_PCRE="$(pkg-config --libs libpcre2-8)"
   elif [ -f /usr/include/pcre.h ]; then
     log "  [+] PCRE (v1)"
@@ -321,6 +321,7 @@ build_ccargs() {
   fi
 
   # --- Sicherheitshärtung (analog zu Debian-Paketen) ------------------------
+  CCARGS="$CCARGS -DNO_NIS"
   CCARGS="$CCARGS -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2"
   CCARGS="$CCARGS -Wno-implicit-function-declaration"
 
@@ -362,6 +363,7 @@ build_postfix() {
     AUXLIBS_PCRE="${AUXLIBS_PCRE}" \
     AUXLIBS_SQLITE="${AUXLIBS_SQLITE}" \
     default_database_type=lmdb \
+    default_cache_db_type=lmdb \
     2>&1 | tee -a "$LOG_FILE"
   local mk_rc=${PIPESTATUS[0]}
   set -e
