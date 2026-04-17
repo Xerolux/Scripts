@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# setup_local_repo.sh - Lokales apt-Repository für Mailserver-Pakete
+# setup_local_repo.sh - Lokales apt-Repository fuer Custom-Build-Pakete
 #
 # Zielumgebung : Ubuntu 24.04 ARM64
+# Pakete       : postfix-custom, dovecot-core-custom, dovecot-pigeonhole-custom, nginx-custom
 # ==============================================================================
 set -Eeuo pipefail
 
@@ -73,14 +74,12 @@ install_repo() {
 
   log "Kopiere vorhandene Pakete in das Repository..."
   local packages_copied=0
-  if [ -d "$DOVECOT_PKG_DIR" ] && ls "$DOVECOT_PKG_DIR"/*.deb >/dev/null 2>&1; then
-    cp -a "$DOVECOT_PKG_DIR"/*.deb "$REPO_DIR/"
-    packages_copied=1
-  fi
-  if [ -d "$POSTFIX_PKG_DIR" ] && ls "$POSTFIX_PKG_DIR"/*.deb >/dev/null 2>&1; then
-    cp -a "$POSTFIX_PKG_DIR"/*.deb "$REPO_DIR/"
-    packages_copied=1
-  fi
+  for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR"; do
+    if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
+      cp -a "$pkg_dir"/*.deb "$REPO_DIR/"
+      packages_copied=1
+    fi
+  done
 
   if [ "$packages_copied" -eq 1 ]; then
     log "Erstelle/Aktualisiere Packages-Index..."
@@ -111,16 +110,15 @@ update_repo() {
   fi
 
   log "Kopiere neue Pakete..."
-  if [ -d "$DOVECOT_PKG_DIR" ] && ls "$DOVECOT_PKG_DIR"/*.deb >/dev/null 2>&1; then
-    cp -u "$DOVECOT_PKG_DIR"/*.deb "$REPO_DIR/" 2>/dev/null || true
-  fi
-  if [ -d "$POSTFIX_PKG_DIR" ] && ls "$POSTFIX_PKG_DIR"/*.deb >/dev/null 2>&1; then
-    cp -u "$POSTFIX_PKG_DIR"/*.deb "$REPO_DIR/" 2>/dev/null || true
-  fi
+  for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR"; do
+    if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
+      cp -u "$pkg_dir"/*.deb "$REPO_DIR/" 2>/dev/null || true
+    fi
+  done
 
   log "Erstelle Packages-Index neu..."
   cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
-  dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz
+    dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9c > Packages.gz
 
   log "Aktualisiere apt Cache..."
   apt-get update -qq
