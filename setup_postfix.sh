@@ -29,6 +29,7 @@ source "setup_postfix.env"
 
 # ftp.porcupine.org ist ein FTP-Server und unterstützt kein HTTPS → http://
 POSTFIX_TARBALL_URLS=(
+  "https://ftp.gwdg.de/pub/misc/postfix/official/postfix-${POSTFIX_VERSION}.tar.gz"
   "https://fossies.org/linux/misc/postfix-${POSTFIX_VERSION}.tar.gz"
   "http://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
   "http://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
