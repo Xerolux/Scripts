@@ -4,6 +4,7 @@
 # Zielumgebung : Ubuntu 24.04 ARM64, ISPConfig
 #
 # Nginx baut mit klassischem ./configure && make && make install
+# OpenSSL wird aus Source gebaut (fuer HTTP/3 QUIC-Support)
 #
 # Empfohlener Ablauf:
 #   1. setup_nginx.sh package   → .deb erstellen (KEIN install)
@@ -28,6 +29,8 @@ NGINX_TARBALL_URLS=(
   "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
   "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
 )
+
+OPENSSL_TARBALL_URL="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
 
 NGINX_BROTLI_VERSION="master"
 NGINX_HEADERS_MORE_VERSION="v0.37"
@@ -149,6 +152,29 @@ prepare_sources() {
   log "Quellen: $BUILD_ROOT/nginx-${NGINX_VERSION}"
 }
 
+prepare_openssl() {
+  local ssl_dir="$BUILD_ROOT/openssl-${OPENSSL_VERSION}"
+  local ssl_tar="$BUILD_ROOT/openssl-${OPENSSL_VERSION}.tar.gz"
+
+  if [ -d "$ssl_dir" ] && [ -f "$ssl_dir/Configure" ]; then
+    log "OpenSSL $OPENSSL_VERSION Quellen bereits vorhanden: $ssl_dir"
+    return 0
+  fi
+
+  if [ ! -f "$ssl_tar" ]; then
+    log "Lade OpenSSL $OPENSSL_VERSION Tarball"
+    curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --progress-bar \
+      "$OPENSSL_TARBALL_URL" -o "$ssl_tar" \
+      || die "OpenSSL Download fehlgeschlagen"
+  else
+    log "OpenSSL Tarball bereits vorhanden: $ssl_tar"
+  fi
+
+  tar xzf "$ssl_tar" -C "$BUILD_ROOT"
+  [ -d "$ssl_dir" ] || die "Tarball entpackt kein Verzeichnis openssl-${OPENSSL_VERSION}"
+  log "OpenSSL Quellen: $ssl_dir"
+}
+
 download_third_party_modules() {
   local modules_dir="$BUILD_ROOT/nginx-modules"
   mkdir -p "$modules_dir"
@@ -202,9 +228,19 @@ build_configure_args() {
   CONF_ARGS="$CONF_ARGS --with-compat"
   CONF_ARGS="$CONF_ARGS --with-file-aio"
   CONF_ARGS="$CONF_ARGS --with-threads"
+  CONF_ARGS="$CONF_ARGS --with-cc-opt=-fPIE\ -fstack-protector-strong\ -D_FORTIFY_SOURCE=2\ -Wno-implicit-function-declaration"
+  CONF_ARGS="$CONF_ARGS --with-ld-opt=-Wl,-z,relro\ -Wl,-z,now\ -pie"
 
-  if pkg-config --exists openssl 2>/dev/null || [ -f /usr/include/openssl/ssl.h ]; then
-    log "  [+] SSL/TLS (OpenSSL)"
+  if [ -d "$BUILD_ROOT/openssl-${OPENSSL_VERSION}" ]; then
+    log "  [+] SSL/TLS (OpenSSL ${OPENSSL_VERSION} aus Source – QUIC-faehig)"
+    CONF_ARGS="$CONF_ARGS --with-openssl=$BUILD_ROOT/openssl-${OPENSSL_VERSION}"
+    CONF_ARGS="$CONF_ARGS --with-openssl-opt=no-tests"
+    CONF_ARGS="$CONF_ARGS --with-http_ssl_module"
+    CONF_ARGS="$CONF_ARGS --with-stream_ssl_module"
+    CONF_ARGS="$CONF_ARGS --with-mail_ssl_module"
+    CONF_ARGS="$CONF_ARGS --with-stream_ssl_preread_module"
+  elif pkg-config --exists openssl 2>/dev/null || [ -f /usr/include/openssl/ssl.h ]; then
+    log "  [+] SSL/TLS (System OpenSSL – HTTP/3 QUIC ggf. eingeschraenkt)"
     CONF_ARGS="$CONF_ARGS --with-http_ssl_module"
     CONF_ARGS="$CONF_ARGS --with-stream_ssl_module"
     CONF_ARGS="$CONF_ARGS --with-mail_ssl_module"
@@ -375,14 +411,81 @@ create_deb_package() {
   mkdir -p "${STAGE_NGINX}/var/log/nginx"
   mkdir -p "${STAGE_NGINX}/var/cache/nginx"
 
+  mkdir -p "${STAGE_NGINX}/lib/systemd/system"
+  cat > "${STAGE_NGINX}/lib/systemd/system/nginx.service" <<'NGXSRV'
+[Unit]
+Description=A high performance web server and a reverse proxy server
+Documentation=https://nginx.org/en/docs/
+After=network-online.target remote-fs.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+PIDFile=/var/run/nginx.pid
+ExecStartPre=/usr/sbin/nginx -t -q -g 'daemon on; master_process on;'
+ExecStart=/usr/sbin/nginx -g 'daemon on; master_process on;'
+ExecReload=/usr/sbin/nginx -g 'daemon on; master_process on;' -s reload
+ExecStop=/bin/kill -s QUIT $MAINPID
+PrivateTmp=true
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+NGXSRV
+  log "systemd service file erstellt"
+
+  mkdir -p "${STAGE_NGINX}/etc/logrotate.d"
+  cat > "${STAGE_NGINX}/etc/logrotate.d/nginx-custom" <<'NGXLR'
+/var/log/nginx/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 www-data adm
+    sharedscripts
+    postrotate
+        [ -f /var/run/nginx.pid ] && kill -USR1 $(cat /var/run/nginx.pid) || true
+    endspost
+}
+NGXLR
+  log "logrotate config erstellt"
+
   log "Staging-Inhalt (relevante Dateien):"
   find "$STAGE_NGINX" \( -name "nginx" -o -name "*.so" \) -type f | sort | tee -a "$LOG_FILE"
 
   local postinst="/tmp/nginx-postinst.sh"
   local postrm="/tmp/nginx-postrm.sh"
-  printf '#!/bin/sh\nset -e\ncommand -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true\nmkdir -p /var/log/nginx /var/cache/nginx\nchown %s:%s /var/log/nginx 2>/dev/null || true\n' "$NGINX_USER" "$NGINX_GROUP" > "$postinst"
-  printf '#!/bin/sh\nset -e\ncommand -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true\n' > "$postrm"
-  chmod 755 "$postinst" "$postrm"
+
+  cat > "$postinst" <<'POSTINST'
+#!/bin/sh
+set -e
+
+if ! id -u www-data >/dev/null 2>&1; then
+  adduser --system --group --no-create-home \
+    --gecos "Web Server" --shell /usr/sbin/nologin www-data 2>/dev/null || true
+fi
+
+mkdir -p /var/log/nginx /var/cache/nginx
+chown www-data:www-data /var/log/nginx 2>/dev/null || true
+
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+command -v apt-mark >/dev/null 2>&1 && apt-mark hold nginx-custom || true
+POSTINST
+  chmod 755 "$postinst"
+
+  cat > "$postrm" <<'POSTRM'
+#!/bin/sh
+set -e
+
+command -v apt-mark >/dev/null 2>&1 && apt-mark unhold nginx-custom 2>/dev/null || true
+rm -f /etc/logrotate.d/nginx-custom
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+POSTRM
+  chmod 755 "$postrm"
 
   local deb_file="$PACKAGE_DIR/nginx-custom_${NGINX_VERSION}_${arch}.deb"
   log "Erstelle $(basename "$deb_file")"
@@ -395,15 +498,16 @@ create_deb_package() {
     --iteration    1 \
     --architecture "$arch" \
     --maintainer   "local build <root@localhost>" \
-    --description  "Nginx $NGINX_VERSION – custom build (SSL/HTTP2/HTTP3/Brotli/GeoIP2/Stream)" \
+    --description  "Nginx $NGINX_VERSION – custom build (SSL/HTTP2/HTTP3+Brotli/GeoIP2/Stream, OpenSSL ${OPENSSL_VERSION})" \
     --depends      libssl3 \
     --depends      libpcre2-8-0 \
     --depends      zlib1g \
     --depends      libgd3 \
-    --depends      libmaxminddb0 \
+    --depends      "libmaxminddb0 | libmaxminddb0t64" \
     --depends      libxslt1.1 \
-    --depends      libbrotli1 \
-    --depends      libgoogle-perftools4 \
+    --depends      libxml2 \
+    --depends      "libbrotli1 | libbrotli1t64" \
+    --depends      "libgoogle-perftools4 | libgoogle-perftools4t64" \
     --conflicts    nginx \
     --conflicts    nginx-core \
     --conflicts    nginx-full \
@@ -623,6 +727,7 @@ package_all() {
   log "=== Starte Nginx Paket-Build ==="
   install_build_deps
   prepare_sources
+  prepare_openssl
   download_third_party_modules
   build_nginx
   create_deb_package

@@ -248,6 +248,8 @@ build_dovecot() {
   # NICHT GESETZT (bewusst):
   #   --with-cassandra       Nur für sehr große Deployments
   #   --enable-doveadm-http  REST-API, kein Bedarf in dieser Umgebung
+  CFLAGS="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2" \
+  LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie" \
   ./configure \
     systemdsystemunitdir=/lib/systemd/system \
     --enable-maintainer-mode \
@@ -472,16 +474,50 @@ create_deb_packages() {
   cat > "$postinst" <<'POSTINST'
 #!/bin/sh
 set -e
+
+if ! id -u dovecot >/dev/null 2>&1; then
+  adduser --system --group --home /var/run/dovecot --no-create-home \
+    --gecos "Dovecot Mail Server" --shell /usr/sbin/nologin dovecot 2>/dev/null || true
+fi
+if ! id -u dovenull >/dev/null 2>&1; then
+  adduser --system --group --home /var/run/dovecot --no-create-home \
+    --gecos "Dovecot Login User" --shell /usr/sbin/nologin dovenull 2>/dev/null || true
+fi
+
+mkdir -p /var/run/dovecot /var/lib/dovecot
+chown dovecot:dovecot /var/lib/dovecot 2>/dev/null || true
+
+if [ ! -f /etc/logrotate.d/dovecot-custom ]; then
+  cat > /etc/logrotate.d/dovecot-custom <<'LR'
+/var/log/dovecot.log /var/log/dovecot-error.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 dovecot adm
+    postrotate
+        command -v dovecot >/dev/null 2>&1 && dovecot log reopen 2>/dev/null || true
+    endspost
+}
+LR
+fi
+
 ldconfig
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
+command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom dovecot-pigeonhole-custom || true
 POSTINST
   chmod 755 "$postinst"
 
   cat > "$postrm" <<'POSTRM'
 #!/bin/sh
 set -e
+
+command -v apt-mark >/dev/null 2>&1 && apt-mark unhold dovecot-core-custom dovecot-pigeonhole-custom 2>/dev/null || true
+rm -f /etc/logrotate.d/dovecot-custom
 ldconfig
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
@@ -516,11 +552,26 @@ POSTRM
     --maintainer   "local build <root@localhost>" \
     --description  "Dovecot IMAP/POP3 $DOVECOT_VERSION – custom build (ISPConfig/MySQL/Sieve)" \
     --depends      libssl3 \
-    --depends      libmariadb3 \
+    --depends      "libmariadb3 | libmariadb3t64" \
     --depends      libpam0g \
     --depends      libicu74 \
     --depends      libsodium23 \
     --depends      "liblua5.4-0 | liblua5.3-0" \
+    --depends      "libldap-2.5-0 | libldap-2.5-0t64" \
+    --depends      "libsqlite3-0 | libsqlite3-0t64" \
+    --depends      "libpq5 | libpq5t64" \
+    --depends      "libkrb5-3 | libkrb5-3t64" \
+    --depends      "libsasl2-2 | libsasl2-2t64" \
+    --depends      "libcurl4 | libcurl4t64" \
+    --depends      "libclucene-core1v5 | libclucene-core1v5t64" \
+    --depends      "libexttextcat-2.0-0 | libexttextcat2t64" \
+    --depends      "libunwind8 | libunwind8t64" \
+    --depends      "libzstd1 | libzstd1t64" \
+    --depends      "liblz4-1 | liblz4-1t64" \
+    --depends      libbz2-1.0 \
+    --depends      liblzma5 \
+    --depends      "libcap2 | libcap2t64" \
+    --depends      libexpat1 \
     --conflicts    dovecot-core \
     --provides     dovecot-core \
     --replaces     dovecot-core \

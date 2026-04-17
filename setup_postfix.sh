@@ -322,8 +322,10 @@ build_ccargs() {
 
   # --- Sicherheitshärtung (analog zu Debian-Paketen) ------------------------
   CCARGS="$CCARGS -DNO_NIS"
+  CCARGS="$CCARGS -DFD_SETSIZE=2048"
   CCARGS="$CCARGS -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2"
   CCARGS="$CCARGS -Wno-implicit-function-declaration"
+  AUXLIBS="$AUXLIBS -Wl,-z,relro -Wl,-z,now"
 
   # Ergebnis exportieren
   printf 'CCARGS=%q\n'        "${CCARGS}"
@@ -362,6 +364,8 @@ build_postfix() {
     AUXLIBS_LMDB="${AUXLIBS_LMDB}" \
     AUXLIBS_PCRE="${AUXLIBS_PCRE}" \
     AUXLIBS_SQLITE="${AUXLIBS_SQLITE}" \
+    pie=yes \
+    dynamicmaps=yes \
     default_database_type=lmdb \
     default_cache_db_type=lmdb \
     2>&1 | tee -a "$LOG_FILE"
@@ -419,9 +423,19 @@ create_deb_package() {
   set -e
   [ "$inst_rc" -eq 0 ] || die "postfix-install fehlgeschlagen (Exit $inst_rc)"
 
-  # /etc/postfix aus Staging entfernen – Konfiguration bleibt beim Backup/Restore
-  rm -rf "${STAGE_POSTFIX}/etc/postfix"
-  log "/etc/postfix aus Staging entfernt (Konfiguration wird nicht verpackt)"
+  # /etc/postfix aus Staging – nur Konfigurationsdateien entfernen,
+  # Meta-Files (postfix.service, postfix-files, post-install, postfix-script)
+  # behalten – sie werden fuer den Betrieb benoetigt.
+  if [ -d "${STAGE_POSTFIX}/etc/postfix" ]; then
+    cd "${STAGE_POSTFIX}/etc/postfix"
+    for f in *.cf *.proto ACCESS aliases canonical \
+             generic header_checks relocated transport \
+             virtual mime_types; do
+      rm -f "$f" 2>/dev/null || true
+    done
+    cd "$BUILD_ROOT"
+    log "/etc/postfix: Konfig-Dateien entfernt, Meta-Files behalten"
+  fi
 
   # Staging-Inhalt prüfen
   log "Staging-Inhalt (relevante Dateien):"
@@ -431,9 +445,57 @@ create_deb_package() {
   # Post-Install / Post-Remove Scripts
   local postinst="/tmp/postfix-postinst.sh"
   local postrm="/tmp/postfix-postrm.sh"
-  printf '#!/bin/sh\nset -e\nldconfig\ncommand -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true\n' > "$postinst"
-  printf '#!/bin/sh\nset -e\nldconfig\ncommand -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true\n' > "$postrm"
-  chmod 755 "$postinst" "$postrm"
+
+  cat > "$postinst" <<'POSTINST'
+#!/bin/sh
+set -e
+
+# System-User/Group anlegen falls nicht vorhanden
+if ! id -u postfix >/dev/null 2>&1; then
+  adduser --system --group --home /var/spool/postfix --no-create-home \
+    --gecos "Postfix Mail Server" --shell /usr/sbin/nologin postfix 2>/dev/null || true
+fi
+if ! getent group postdrop >/dev/null 2>&1; then
+  addgroup --system postdrop 2>/dev/null || true
+fi
+
+# Verzeichnisse erstellen
+mkdir -p /var/spool/postfix /var/lib/postfix /var/run/postfix
+chown postfix:postfix /var/lib/postfix 2>/dev/null || true
+
+# Logrotate
+if [ ! -f /etc/logrotate.d/postfix-custom ]; then
+  cat > /etc/logrotate.d/postfix-custom <<'LR'
+/var/log/mail.log /var/log/mail.err /var/log/mail.info {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 syslog adm
+}
+LR
+fi
+
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+
+# apt-mark hold – verhindert ueberschreiben durch apt upgrade
+command -v apt-mark >/dev/null 2>&1 && apt-mark hold postfix-custom || true
+POSTINST
+  chmod 755 "$postinst"
+
+  cat > "$postrm" <<'POSTRM'
+#!/bin/sh
+set -e
+
+command -v apt-mark >/dev/null 2>&1 && apt-mark unhold postfix-custom 2>/dev/null || true
+rm -f /etc/logrotate.d/postfix-custom
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+POSTRM
+  chmod 755 "$postrm"
 
   local deb_file="$PACKAGE_DIR/postfix-custom_${POSTFIX_VERSION}_${arch}.deb"
   log "Erstelle $(basename "$deb_file")"
@@ -447,14 +509,16 @@ create_deb_package() {
     --architecture "$arch" \
     --maintainer   "local build <root@localhost>" \
     --description  "Postfix MTA $POSTFIX_VERSION – custom build (ISPConfig/MariaDB/SASL/LMDB/TLS)" \
-    --depends      libssl3 \
-    --depends      libsasl2-2 \
-    --depends      libmariadb3 \
-    --depends      libldap-2.5-0 \
+    --depends      "libssl3 | libssl3t64" \
+    --depends      "libsasl2-2 | libsasl2-2t64" \
+    --depends      "libmariadb3 | libmariadb3t64" \
+    --depends      "libldap-2.5-0 | libldap-2.5-0t64" \
     --depends      libpcre2-8-0 \
     --depends      liblmdb0 \
-    --depends      libsqlite3-0 \
+    --depends      "libsqlite3-0 | libsqlite3-0t64" \
     --depends      libicu74 \
+    --depends      "libcdb1 | libcdb1t64 | tinycdb" \
+    --depends      "libpq5 | libpq5t64" \
     --conflicts    postfix \
     --provides     postfix \
     --replaces     postfix \
