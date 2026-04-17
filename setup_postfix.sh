@@ -238,12 +238,12 @@ build_ccargs() {
     [ -f "$p/mysql.h" ] && mysql_inc="$p" && break
   done
   local mysql_lib=""
-  for l in libmariadb libmysqlclient; do
-    [ -f "/usr/lib/aarch64-linux-gnu/${l}.so" ] && mysql_lib="${l}" && break
-    [ -f "/usr/lib/${l}.so" ]                    && mysql_lib="${l}" && break
+  for l in mariadb mysqlclient; do
+    [ -f "/usr/lib/aarch64-linux-gnu/lib${l}.so" ] && mysql_lib="${l}" && break
+    [ -f "/usr/lib/lib${l}.so" ]                    && mysql_lib="${l}" && break
   done
   if [ -n "$mysql_inc" ] && [ -n "$mysql_lib" ]; then
-    log "  [+] MariaDB/MySQL ($mysql_inc, lib: $mysql_lib)"
+    log "  [+] MariaDB/MySQL ($mysql_inc, lib: lib${mysql_lib})"
     CCARGS="$CCARGS -DHAS_MYSQL -I${mysql_inc}"
     AUXLIBS="$AUXLIBS -l${mysql_lib} -lz -lm"
   else
@@ -273,12 +273,15 @@ build_ccargs() {
   fi
 
   # --- LMDB – Ersatz für hash/btree (wichtig in Postfix 3.11) ---------------
+  # -DNO_DB: Berkeley DB (db.h) explizit deaktivieren, da LMDB als
+  # Standard-Datenbanktyp gesetzt ist. Ohne diesen Flag bricht makedefs ab.
   if [ -f /usr/include/lmdb.h ]; then
     log "  [+] LMDB"
-    CCARGS="$CCARGS -DHAS_LMDB"
+    CCARGS="$CCARGS -DHAS_LMDB -DNO_DB"
     AUXLIBS_LMDB="-llmdb"
   else
     log "  [-] LMDB nicht gefunden (liblmdb-dev prüfen)"
+    die "LMDB ist Pflicht (default_database_type=lmdb) – liblmdb-dev installieren"
   fi
 
   # --- SQLite ----------------------------------------------------------------
