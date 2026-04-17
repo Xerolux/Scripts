@@ -86,7 +86,7 @@ create_backup() {
   dpkg -l 2>/dev/null | awk '/^ii/ && /postfix/ {print $2}' > "$backup_dir/packages.txt" || true
   # Laufende Konfiguration
   if command -v postconf >/dev/null 2>&1; then
-    postfix --version > "$backup_dir/postfix-version.txt" 2>&1 || true
+    postfix version > "$backup_dir/postfix-version.txt" 2>&1 || true
     postconf         > "$backup_dir/postfix-config.txt"   2>&1 || true
     postconf -m      > "$backup_dir/postfix-maps.txt"     2>&1 || true
   fi
@@ -288,7 +288,7 @@ build_ccargs() {
   # --- ICU – SMTPUTF8 / Email Address Internationalization ------------------
   if pkg-config --exists icu-uc icu-i18n 2>/dev/null; then
     log "  [+] ICU (SMTPUTF8)"
-    CCARGS="$CCARGS -DUSE_LDAP_SASL $(pkg-config --cflags icu-uc icu-i18n)"
+    CCARGS="$CCARGS -DHAS_ICU $(pkg-config --cflags icu-uc icu-i18n)"
     AUXLIBS="$AUXLIBS $(pkg-config --libs icu-uc icu-i18n)"
   else
     log "  [-] ICU nicht gefunden (libicu-dev prüfen)"
@@ -520,7 +520,7 @@ verify_build() {
 
     echo ""
     echo "--- Version ---"
-    postfix --version 2>/dev/null || true
+    postfix version 2>/dev/null || true
   else
     echo "postconf nicht gefunden – Postfix noch nicht installiert"
   fi
@@ -572,7 +572,7 @@ restart_service() {
 post_checks() {
   log "Prüfe Installation"
   command -v postfix >/dev/null 2>&1 || die "postfix-Binary nicht gefunden"
-  log "Postfix Version: $(postfix --version 2>&1)"
+  log "Postfix Version: $(postfix version 2>&1)"
 
   log "Konfigurationscheck (postfix check)"
   postfix check >> "$LOG_FILE" 2>&1 \
@@ -653,7 +653,7 @@ status_cmd() {
 
   if command -v postfix >/dev/null 2>&1; then
     echo "Binary  : $(command -v postfix)"
-    echo "Version : $(postfix --version 2>/dev/null || echo 'unbekannt')"
+    echo "Version : $(postfix version 2>/dev/null || echo 'unbekannt')"
   else
     echo "Postfix-Binary: NICHT GEFUNDEN"
   fi

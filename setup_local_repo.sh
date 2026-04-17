@@ -85,7 +85,7 @@ install_repo() {
   if [ "$packages_copied" -eq 1 ]; then
     log "Erstelle/Aktualisiere Packages-Index..."
     cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
-    dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz
+    dpkg-scanpackages -m . 2>/dev/null | gzip -9c > Packages.gz
   else
     log "Keine .deb Pakete zum Kopieren gefunden, erstelle leeres Repository."
     cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
