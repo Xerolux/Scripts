@@ -49,20 +49,26 @@ require_root() {
 usage() {
   cat <<'EOF'
 Verwendung:
-  setup_dovecot.sh package              – Beide Pakete bauen (dovecot-core + pigeonhole)
-  setup_dovecot.sh package-dovecot      – Nur dovecot-core bauen + .deb erstellen
-  setup_dovecot.sh package-pigeonhole   – Nur pigeonhole bauen + .deb erstellen
-                                          (setzt fertigen dovecot-core Tarball voraus)
-  setup_dovecot.sh install              – Backup + dpkg -i der erzeugten .deb-Pakete
-  setup_dovecot.sh build-only           – Nur kompilieren, kein Paket, kein install
-  setup_dovecot.sh backup           – Nur Backup erstellen
-  setup_dovecot.sh restore          – Letztes Backup einspielen
-  setup_dovecot.sh restore /root/dovecot-backup/<timestamp>
-  setup_dovecot.sh status           – Zustand anzeigen
-  setup_dovecot.sh list-backups     – Verfügbare Backups auflisten
-  setup_dovecot.sh list-packages    – Erzeugte .deb-Pakete auflisten
-  setup_dovecot.sh check-config     – dovecot -n ausführen
-  setup_dovecot.sh uninstall        – Custom-Pakete via dpkg -r entfernen
+  setup_dovecot.sh [--screen] <Befehl>
+
+Optionen:
+  --screen              Skript in einer GNU Screen Session ausführen (optional)
+
+Befehle:
+  package              – Beide Pakete bauen (dovecot-core + pigeonhole)
+  package-dovecot      – Nur dovecot-core bauen + .deb erstellen
+  package-pigeonhole   – Nur pigeonhole bauen + .deb erstellen
+                         (setzt fertigen dovecot-core Tarball voraus)
+  install              – Backup + dpkg -i der erzeugten .deb-Pakete
+  build-only           – Nur kompilieren, kein Paket, kein install
+  backup               – Nur Backup erstellen
+  restore              – Letztes Backup einspielen
+  restore /root/dovecot-backup/<timestamp>
+  status               – Zustand anzeigen
+  list-backups         – Verfügbare Backups auflisten
+  list-packages        – Erzeugte .deb-Pakete auflisten
+  check-config         – dovecot -n ausführen
+  uninstall            – Custom-Pakete via dpkg -r entfernen
 
 Deinstallation manuell:
   dpkg -r dovecot-pigeonhole-custom dovecot-core-custom
@@ -1236,21 +1242,29 @@ check_os_arch() {
     exit 1
   fi
 
-  if ! command -v screen >/dev/null 2>&1; then
-    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
-  fi
 }
 
 main() {
   check_os_arch
 
-  if [ -z "${STY:-}" ]; then
-    echo "Starte Skript im Hintergrund (Screen Session: dovecot_build)..."
-    exec screen -dmS dovecot_build bash "$0" "$@"
-    exit 0
-  fi
+  # --screen vor den restlichen Argumenten herausfiltern
+  local use_screen=0
+  local args=()
+  for arg in "$@"; do
+    [ "$arg" = "--screen" ] && use_screen=1 || args+=("$arg")
+  done
+  set -- "${args[@]+"${args[@]}"}"
 
   require_root
+
+  if [ "$use_screen" -eq 1 ]; then
+    if ! command -v screen >/dev/null 2>&1; then
+      apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
+    fi
+    echo "Starte Skript in Screen Session: dovecot_build ..."
+    exec screen -dmS dovecot_build bash "$0" "$@"
+  fi
+
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"
   touch "$LOG_FILE"
 
