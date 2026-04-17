@@ -322,11 +322,11 @@ build_ccargs() {
   CCARGS="$CCARGS -Wno-implicit-function-declaration"
 
   # Ergebnis exportieren
-  echo "CCARGS=${CCARGS}"
-  echo "AUXLIBS=${AUXLIBS}"
-  echo "AUXLIBS_LMDB=${AUXLIBS_LMDB}"
-  echo "AUXLIBS_PCRE=${AUXLIBS_PCRE}"
-  echo "AUXLIBS_SQLITE=${AUXLIBS_SQLITE}"
+  printf 'CCARGS=%q\n'        "${CCARGS}"
+  printf 'AUXLIBS=%q\n'       "${AUXLIBS}"
+  printf 'AUXLIBS_LMDB=%q\n' "${AUXLIBS_LMDB}"
+  printf 'AUXLIBS_PCRE=%q\n' "${AUXLIBS_PCRE}"
+  printf 'AUXLIBS_SQLITE=%q\n' "${AUXLIBS_SQLITE}"
 }
 
 # ------------------------------------------------------------------------------
