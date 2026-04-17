@@ -27,17 +27,20 @@ if [[ ! -f "setup_postfix.env" ]]; then
 fi
 source "setup_postfix.env"
 
-POSTFIX_TARBALL="https://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
-# Spiegel-Fallbacks (HTTPS bevorzugt)
-POSTFIX_TARBALL_MIRROR="https://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
-POSTFIX_TARBALL_ALT1="https://fossies.org/linux/misc/postfix-${POSTFIX_VERSION}.tar.gz"
+# ftp.porcupine.org ist ein FTP-Server und unterstützt kein HTTPS → http://
+POSTFIX_TARBALL_URLS=(
+  "https://ftp.gwdg.de/pub/misc/postfix/official/postfix-${POSTFIX_VERSION}.tar.gz"
+  "https://fossies.org/linux/misc/postfix-${POSTFIX_VERSION}.tar.gz"
+  "http://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
+  "http://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
+)
 
 # Installationspfade (passend zu bestehender ISPConfig-Installation)
 # Diese werden in der Funktion create_deb_package direkt verwendet
 # ------------------------------------------------------------------------------
 # Hilfsfunktionen
 # ------------------------------------------------------------------------------
-log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
+log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE" >&2; }
 die()  { log "FEHLER: $*"; exit 1; }
 
 require_root() {
@@ -160,13 +163,8 @@ prepare_sources() {
   if [ ! -f "$pf_tar" ]; then
     log "Lade Postfix $POSTFIX_VERSION Tarball"
     local url
-    local urls=(
-      "$POSTFIX_TARBALL"
-      "$POSTFIX_TARBALL_MIRROR"
-      "$POSTFIX_TARBALL_ALT1"
-    )
     local downloaded=0
-    for url in "${urls[@]}"; do
+    for url in "${POSTFIX_TARBALL_URLS[@]}"; do
       log "Versuche Download: $url"
       if curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --progress-bar "$url" -o "$pf_tar"; then
         downloaded=1
