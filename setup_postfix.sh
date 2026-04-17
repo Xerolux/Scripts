@@ -403,6 +403,8 @@ create_deb_package() {
   rm -rf "$STAGE_POSTFIX"
   mkdir -p "$STAGE_POSTFIX"
 
+  export LD_LIBRARY_PATH="$BUILD_ROOT/postfix-${POSTFIX_VERSION}/lib:${LD_LIBRARY_PATH:-}"
+
   # postfix-install ist das offizielle Install-Script
   # install_root= setzt das Staging-Verzeichnis
   set +e
@@ -421,6 +423,7 @@ create_deb_package() {
     2>&1 | tee -a "$LOG_FILE"
   local inst_rc=${PIPESTATUS[0]}
   set -e
+  unset LD_LIBRARY_PATH
   [ "$inst_rc" -eq 0 ] || die "postfix-install fehlgeschlagen (Exit $inst_rc)"
 
   # /etc/postfix aus Staging – nur Konfigurationsdateien entfernen,
