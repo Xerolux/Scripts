@@ -47,15 +47,22 @@ require_root() {
 usage() {
   cat <<'EOF'
 Verwendung:
-  setup_postfix.sh package          – Quellen laden, bauen, .deb erstellen (KEIN install)
-  setup_postfix.sh install          – Backup + dpkg -i des erzeugten .deb
-  setup_postfix.sh backup           – Nur Backup erstellen
-  setup_postfix.sh restore          – Letztes Backup einspielen
-  setup_postfix.sh restore /root/postfix-backup/<timestamp>
-  setup_postfix.sh status           – Zustand + Module anzeigen
-  setup_postfix.sh list-backups     – Verfügbare Backups auflisten
-  setup_postfix.sh check-config     – postfix check ausführen
-  setup_postfix.sh uninstall        – Custom-Paket via dpkg -r entfernen
+  setup_postfix.sh [--screen] <Befehl>
+
+Optionen:
+  --screen         Skript in einer GNU Screen Session ausführen (optional)
+
+Befehle:
+  package          – Quellen laden, bauen, .deb erstellen (KEIN install)
+  install          – Backup + dpkg -i des erzeugten .deb
+  backup           – Nur Backup erstellen
+  restore          – Letztes Backup einspielen
+  restore /root/postfix-backup/<timestamp>
+  status           – Zustand + Module anzeigen
+  list-backups     – Verfügbare Backups auflisten
+  check-config     – postfix check ausführen
+  uninstall        – Custom-Paket via dpkg -r entfernen
+  verify           – Modul-Verifikation (nach Installation)
 
 Deinstallation manuell:
   dpkg -r postfix-custom
@@ -783,21 +790,29 @@ check_os_arch() {
     exit 1
   fi
 
-  if ! command -v screen >/dev/null 2>&1; then
-    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
-  fi
 }
 
 main() {
   check_os_arch
 
-  if [ -z "${STY:-}" ]; then
-    echo "Starte Skript im Hintergrund (Screen Session: postfix_build)..."
-    exec screen -dmS postfix_build bash "$0" "$@"
-    exit 0
-  fi
+  # --screen vor den restlichen Argumenten herausfiltern
+  local use_screen=0
+  local args=()
+  for arg in "$@"; do
+    [ "$arg" = "--screen" ] && use_screen=1 || args+=("$arg")
+  done
+  set -- "${args[@]+"${args[@]}"}"
 
   require_root
+
+  if [ "$use_screen" -eq 1 ]; then
+    if ! command -v screen >/dev/null 2>&1; then
+      apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
+    fi
+    echo "Starte Skript in Screen Session: postfix_build ..."
+    exec screen -dmS postfix_build bash "$0" "$@"
+  fi
+
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"
   touch "$LOG_FILE"
 
