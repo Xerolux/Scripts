@@ -228,8 +228,9 @@ build_configure_args() {
   CONF_ARGS="$CONF_ARGS --with-compat"
   CONF_ARGS="$CONF_ARGS --with-file-aio"
   CONF_ARGS="$CONF_ARGS --with-threads"
-  CONF_ARGS="$CONF_ARGS --with-cc-opt=-fPIE\ -fstack-protector-strong\ -D_FORTIFY_SOURCE=2\ -Wno-implicit-function-declaration"
-  CONF_ARGS="$CONF_ARGS --with-ld-opt=-Wl,-z,relro\ -Wl,-z,now\ -pie"
+
+  CC_OPT="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wno-implicit-function-declaration"
+  LD_OPT="-Wl,-z,relro -Wl,-z,now -pie"
 
   if [ -d "$BUILD_ROOT/openssl-${OPENSSL_VERSION}" ]; then
     log "  [+] SSL/TLS (OpenSSL ${OPENSSL_VERSION} aus Source – QUIC-faehig)"
@@ -370,10 +371,15 @@ build_nginx() {
   conf_args="$(build_configure_args)"
 
   log "Configure-Argumente:${conf_args}"
+  log "CC_OPT: ${CC_OPT:-}"
+  log "LD_OPT: ${LD_OPT:-}"
 
   log "Führe ./configure aus"
   set +e
-  ./configure ${conf_args} 2>&1 | tee -a "$LOG_FILE"
+  ./configure \
+    --with-cc-opt="${CC_OPT:-}" \
+    --with-ld-opt="${LD_OPT:-}" \
+    ${conf_args} 2>&1 | tee -a "$LOG_FILE"
   local conf_rc=${PIPESTATUS[0]}
   set -e
   [ "$conf_rc" -eq 0 ] || die "./configure fehlgeschlagen (Exit $conf_rc)"
