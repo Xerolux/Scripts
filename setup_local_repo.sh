@@ -74,7 +74,7 @@ install_repo() {
 
   log "Kopiere vorhandene Pakete in das Repository..."
   local packages_copied=0
-  for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR"; do
+  for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR" "$PHP_PKG_DIR"; do
     if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
       cp -a "$pkg_dir"/*.deb "$REPO_DIR/"
       packages_copied=1
@@ -85,6 +85,7 @@ install_repo() {
     log "Erstelle/Aktualisiere Packages-Index..."
     cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
     dpkg-scanpackages -m . 2>/dev/null | gzip -9c > Packages.gz
+    generate_checksums
   else
     log "Keine .deb Pakete zum Kopieren gefunden, erstelle leeres Repository."
     cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
@@ -110,7 +111,7 @@ update_repo() {
   fi
 
   log "Kopiere neue Pakete..."
-  for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR"; do
+  for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR" "$PHP_PKG_DIR"; do
     if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
       cp -u "$pkg_dir"/*.deb "$REPO_DIR/" 2>/dev/null || true
     fi
@@ -119,6 +120,7 @@ update_repo() {
   log "Erstelle Packages-Index neu..."
   cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
     dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9c > Packages.gz
+    generate_checksums
 
   log "Aktualisiere apt Cache..."
   apt-get update -qq
@@ -148,6 +150,15 @@ uninstall_repo() {
   apt-get update -qq || true
 
   log "=== Deinstallation abgeschlossen ==="
+}
+
+generate_checksums() {
+  if [ -d "$REPO_DIR" ] && ls "$REPO_DIR"/*.deb >/dev/null 2>&1; then
+    log "Erstelle SHA256SUMS..."
+    cd "$REPO_DIR"
+    sha256sum *.deb > SHA256SUMS
+    log "SHA256SUMS erstellt ($(wc -l < SHA256SUMS) Pakete)"
+  fi
 }
 
 status_repo() {

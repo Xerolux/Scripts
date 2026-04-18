@@ -37,6 +37,99 @@ STAGE_DOVECOT="/tmp/dovecot-stage"
 STAGE_PIGEONHOLE="/tmp/pigeonhole-stage"
 
 # ------------------------------------------------------------------------------
+# Dovecot Sub-Package-Definitionen
+#
+# Ubuntu/Debian teilt Dovecot in viele separate Pakete auf:
+#   dovecot-mysql, dovecot-pgsql, dovecot-sqlite, dovecot-ldap,
+#   dovecot-gssapi, dovecot-solr, dovecot-imapd, dovecot-pop3d, dovecot-lmtpd
+#
+# Jedes Sub-Paket enthaelt nur die entsprechenden .so-Module.
+# Der Core-Paket (dovecot-core-custom) stellt das Binary + Core-Module bereit.
+#
+# SUB_SOFIND   – find-Pattern fuer die .so-Dateien (unter modules/)
+# SUB_PKGNAME  – .deb-Paketname
+# SUB_DESC     – Kurzbeschreibung
+# SUB_DEPS     – Zusaetzliche Paket-Abhaengigkeiten (Leerzeichen-getrennt)
+# SUB_CONFLICTS – Offizielles Ubuntu-Paket das ersetzt wird
+# ------------------------------------------------------------------------------
+declare -A SUB_SOFIND SUB_PKGNAME SUB_DESC SUB_DEPS SUB_CONFLICTS
+
+# --- MySQL/MariaDB -----------------------------------------------------------
+SUB_SOFIND[mysql]="libdriver_mysql.so"
+SUB_PKGNAME[mysql]="dovecot-custom-mysql"
+SUB_DESC[mysql]="Dovecot MySQL/MariaDB support"
+SUB_DEPS[mysql]="dovecot-core-custom libmariadb3"
+SUB_CONFLICTS[mysql]="dovecot-mysql"
+
+# --- PostgreSQL ---------------------------------------------------------------
+SUB_SOFIND[pgsql]="libdriver_pgsql.so"
+SUB_PKGNAME[pgsql]="dovecot-custom-pgsql"
+SUB_DESC[pgsql]="Dovecot PostgreSQL support"
+SUB_DEPS[pgsql]="dovecot-core-custom libpq5"
+SUB_CONFLICTS[pgsql]="dovecot-pgsql"
+
+# --- SQLite -------------------------------------------------------------------
+SUB_SOFIND[sqlite]="libdriver_sqlite.so"
+SUB_PKGNAME[sqlite]="dovecot-custom-sqlite"
+SUB_DESC[sqlite]="Dovecot SQLite support"
+SUB_DEPS[sqlite]="dovecot-core-custom libsqlite3-0"
+SUB_CONFLICTS[sqlite]="dovecot-sqlite"
+
+# --- LDAP ---------------------------------------------------------------------
+SUB_SOFIND[ldap]="libauthdb_ldap.so"
+SUB_PKGNAME[ldap]="dovecot-custom-ldap"
+SUB_DESC[ldap]="Dovecot LDAP support"
+SUB_DEPS[ldap]="dovecot-core-custom libldap-2.5-0"
+SUB_CONFLICTS[ldap]="dovecot-ldap"
+
+# --- GSSAPI/Kerberos ----------------------------------------------------------
+SUB_SOFIND[gssapi]="libmech_gssapi.so"
+SUB_PKGNAME[gssapi]="dovecot-custom-gssapi"
+SUB_DESC[gssapi]="Dovecot GSSAPI/Kerberos authentication"
+SUB_DEPS[gssapi]="dovecot-core-custom libkrb5-3"
+SUB_CONFLICTS[gssapi]="dovecot-gssapi"
+
+# --- Solr (FTS) ---------------------------------------------------------------
+SUB_SOFIND[solr]="lib21_fts_solr_plugin.so"
+SUB_PKGNAME[solr]="dovecot-custom-solr"
+SUB_DESC[solr]="Dovecot Solr full-text search"
+SUB_DEPS[solr]="dovecot-core-custom libexpat1"
+SUB_CONFLICTS[solr]="dovecot-solr"
+
+# --- IMAP protocol ------------------------------------------------------------
+SUB_SOFIND[imapd]="lib02_imap_acl_plugin.so"
+SUB_PKGNAME[imapd]="dovecot-custom-imapd"
+SUB_DESC[imapd]="Dovecot IMAP daemon"
+SUB_DEPS[imapd]="dovecot-core-custom"
+SUB_CONFLICTS[imapd]="dovecot-imapd"
+
+# --- POP3 protocol ------------------------------------------------------------
+SUB_SOFIND[pop3d]="libpop3"
+SUB_PKGNAME[pop3d]="dovecot-custom-pop3d"
+SUB_DESC[pop3d]="Dovecot POP3 daemon"
+SUB_DEPS[pop3d]="dovecot-core-custom"
+SUB_CONFLICTS[pop3d]="dovecot-pop3d"
+
+# --- LMTP protocol ------------------------------------------------------------
+SUB_SOFIND[lmtpd]="liblmtp"
+SUB_PKGNAME[lmtpd]="dovecot-custom-lmtpd"
+SUB_DESC[lmtpd]="Dovecot LMTP server"
+SUB_DEPS[lmtpd]="dovecot-core-custom"
+SUB_CONFLICTS[lmtpd]="dovecot-lmtpd"
+
+DOVECOT_SUBPACKAGES=(
+  mysql
+  pgsql
+  sqlite
+  ldap
+  gssapi
+  solr
+  imapd
+  pop3d
+  lmtpd
+)
+
+# ------------------------------------------------------------------------------
 # Hilfsfunktionen
 # ------------------------------------------------------------------------------
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
@@ -436,12 +529,28 @@ build_pigeonhole() {
   set -e
   [ "$ph_inst_rc" -eq 0 ] || die "Pigeonhole make install fehlgeschlagen (Exit $ph_inst_rc)"
 
+  # Gzip man pages
+  find "${STAGE_PIGEONHOLE}/usr/share/man" -type f -name '*.?' ! -name '*.gz' -exec gzip -f {} \; 2>/dev/null || true
+
   # Aufräumen: ldconfig-Eintrag entfernen, Symlink ersetzen durch echten Link
   rm -f /etc/ld.so.conf.d/dovecot-staging.conf
   rm -f /usr/include/dovecot
   ldconfig
 
   log "Pigeonhole Build fertig"
+}
+
+# ------------------------------------------------------------------------------
+# SHA256-Checksummen fuer alle erzeugten .deb-Pakete
+# ------------------------------------------------------------------------------
+generate_checksums() {
+  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+    log "Erstelle SHA256SUMS fuer Pakete..."
+    cd "$PACKAGE_DIR"
+    sha256sum *.deb > SHA256SUMS
+    log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
+    cat SHA256SUMS | tee -a "$LOG_FILE"
+  fi
 }
 
 # ------------------------------------------------------------------------------
@@ -487,6 +596,36 @@ fi
 mkdir -p /var/run/dovecot /var/lib/dovecot
 chown dovecot:dovecot /var/lib/dovecot 2>/dev/null || true
 
+# Copy default configs on fresh install
+if [ ! -f /etc/dovecot/dovecot.conf ]; then
+  echo "INFO: Keine dovecot.conf gefunden – installiere Default-Konfiguration"
+  if [ -d /usr/share/dovecot ]; then
+    cp -a /usr/share/dovecot/dovecot.conf /etc/dovecot/dovecot.conf 2>/dev/null || true
+    mkdir -p /etc/dovecot/conf.d
+    if [ -d /usr/share/dovecot/conf.d ]; then
+      for f in /usr/share/dovecot/conf.d/*.conf; do
+        [ -f "$f" ] && cp -a "$f" /etc/dovecot/conf.d/ 2>/dev/null || true
+      done
+    fi
+  fi
+  # Generate DH params if missing
+  if [ ! -f /etc/dovecot/dh.pem ] && command -v openssl >/dev/null 2>&1; then
+    openssl dhparam -out /etc/dovecot/dh.pem 2048 2>/dev/null &
+  fi
+fi
+
+# Create PAM config for dovecot if missing
+if [ ! -f /etc/pam.d/dovecot ]; then
+  echo "auth    required        pam_unix.so    nullok" > /etc/pam.d/dovecot
+  echo "account required        pam_unix.so" >> /etc/pam.d/dovecot
+fi
+
+# Create /etc/default/dovecot if missing
+if [ ! -f /etc/default/dovecot ]; then
+  echo "# Dovecot startup configuration" > /etc/default/dovecot
+  echo "ENABLED=1" >> /etc/default/dovecot
+fi
+
 if [ ! -f /etc/logrotate.d/dovecot-custom ]; then
   cat > /etc/logrotate.d/dovecot-custom <<'LR'
 /var/log/dovecot.log /var/log/dovecot-error.log {
@@ -508,7 +647,10 @@ ldconfig
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
-command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom dovecot-pigeonhole-custom || true
+  command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom dovecot-pigeonhole-custom || true
+  for sp in "${DOVECOT_SUBPACKAGES[@]}"; do
+    command -v apt-mark >/dev/null 2>&1 && apt-mark hold "${SUB_PKGNAME[$sp]}" 2>/dev/null || true
+  done
 POSTINST
   chmod 755 "$postinst"
 
@@ -531,8 +673,28 @@ POSTRM
   cd "$BUILD_ROOT/core"
   make install DESTDIR="$STAGE_DOVECOT"
 
+  # Gzip man pages
+  find "${STAGE_DOVECOT}/usr/share/man" -type f -name '*.?' ! -name '*.gz' -exec gzip -f {} \; 2>/dev/null || true
+
   # /etc/dovecot NICHT ins Paket – Konfiguration via backup/restore
   rm -rf "${STAGE_DOVECOT}/etc/dovecot"
+
+  # tmpfiles.d: Runtime-Verzeichnisse bei Bedarf erzeugen (wie offizielle Pakete)
+  mkdir -p "${STAGE_DOVECOT}/usr/lib/tmpfiles.d"
+  cat > "${STAGE_DOVECOT}/usr/lib/tmpfiles.d/dovecot-custom.conf" <<'EOF'
+# Dovecot runtime directories
+d /run/dovecot 0755 dovecot dovecot -
+d /run/dovecot/login 0755 dovenull dovenull -
+d /var/run/dovecot 0755 dovecot dovecot -
+d /var/run/dovecot/login 0755 dovenull dovenull -
+EOF
+
+  # Systemd-Hardening: Schutzmechanismen wie offizielle Ubuntu-Pakete
+  if [ -f "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service" ]; then
+    sed -i '/^\[Service\]/a LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true' \
+      "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service"
+    log "Systemd-Hardening angewendet"
+  fi
 
   # Übersicht was tatsächlich drin ist
   log "Staging-Inhalt (relevante Dateien):"
@@ -542,6 +704,46 @@ POSTRM
 
   local deb_core="$PACKAGE_DIR/dovecot-core-custom_${DOVECOT_VERSION}_${arch}.deb"
   log "Erstelle $(basename "$deb_core")"
+
+  # Sub-Package .so aus Core-Staging entfernen – die kommen in eigene Pakete
+  local mod_dir="${STAGE_DOVECOT}/usr/lib/dovecot/modules"
+  local sub_so_count=0
+  for sp in "${DOVECOT_SUBPACKAGES[@]}"; do
+    local sofind="${SUB_SOFIND[$sp]}"
+    local found_sos
+    found_sos="$(find "$mod_dir" -name "*${sofind}*" -type f 2>/dev/null || true)"
+    if [ -n "$found_sos" ]; then
+      echo "$found_sos" | while read -r f; do
+        log "Verschiebe $(basename "$f") aus Core-Staging"
+        rm -f "$f"
+        sub_so_count=$((sub_so_count + 1))
+      done
+    fi
+    # Also remove protocol binaries (imap, pop3, lmtp) from staging
+    if [ "$sp" = "imapd" ]; then
+      for b in imap imap-login imap-urlauth imap-urlauth-login imap-urlauth-worker imap-hibernate; do
+        rm -f "${STAGE_DOVECOT}/usr/lib/dovecot/$b" 2>/dev/null || true
+      done
+    elif [ "$sp" = "pop3d" ]; then
+      for b in pop3 pop3-login; do
+        rm -f "${STAGE_DOVECOT}/usr/lib/dovecot/$b" 2>/dev/null || true
+      done
+    elif [ "$sp" = "lmtpd" ]; then
+      rm -f "${STAGE_DOVECOT}/usr/lib/dovecot/lmtp" 2>/dev/null || true
+    fi
+    # Remove SQL driver .so from toplevel lib dir
+    if [ "$sp" = "mysql" ] || [ "$sp" = "pgsql" ] || [ "$sp" = "sqlite" ]; then
+      local drvname
+      drvname="${sofind}"
+      rm -f "${STAGE_DOVECOT}/usr/lib/dovecot/${drvname}" 2>/dev/null || true
+    fi
+    # Remove LDAP shared lib
+    if [ "$sp" = "ldap" ]; then
+      rm -f "${STAGE_DOVECOT}/usr/lib/dovecot/libdovecot-ldap.so"* 2>/dev/null || true
+    fi
+  done
+  log "$sub_so_count Sub-Package-.so aus Core-Staging entfernt"
+
   fpm \
     --input-type   dir \
     --output-type  deb \
@@ -550,20 +752,13 @@ POSTRM
     --iteration    1 \
     --architecture "$arch" \
     --maintainer   "local build <root@localhost>" \
-    --description  "Dovecot IMAP/POP3 $DOVECOT_VERSION – custom build (ISPConfig/MySQL/Sieve)" \
+    --description  "Dovecot IMAP/POP3 $DOVECOT_VERSION – custom build (core)" \
     --depends      libssl3 \
-    --depends      "libmariadb3 | libmariadb3t64" \
     --depends      libpam0g \
     --depends      libicu74 \
     --depends      libsodium23 \
     --depends      "liblua5.4-0 | liblua5.3-0" \
-    --depends      "libldap-2.5-0 | libldap-2.5-0t64" \
-    --depends      "libsqlite3-0 | libsqlite3-0t64" \
-    --depends      "libpq5 | libpq5t64" \
-    --depends      "libkrb5-3 | libkrb5-3t64" \
-    --depends      "libsasl2-2 | libsasl2-2t64" \
-    --depends      "libcurl4 | libcurl4t64" \
-    --depends      "libclucene-core1v5 | libclucene-core1v5t64" \
+    --depends      libsasl2-2 \
     --depends      "libexttextcat-2.0-0 | libexttextcat2t64" \
     --depends      "libunwind8 | libunwind8t64" \
     --depends      "libzstd1 | libzstd1t64" \
@@ -571,10 +766,28 @@ POSTRM
     --depends      libbz2-1.0 \
     --depends      liblzma5 \
     --depends      "libcap2 | libcap2t64" \
-    --depends      libexpat1 \
     --conflicts    dovecot-core \
     --provides     dovecot-core \
     --replaces     dovecot-core \
+    --conflicts    dovecot-imapd \
+    --conflicts    dovecot-pop3d \
+    --conflicts    dovecot-lmtpd \
+    --conflicts    dovecot-mysql \
+    --conflicts    dovecot-pgsql \
+    --conflicts    dovecot-sqlite \
+    --conflicts    dovecot-ldap \
+    --conflicts    dovecot-gssapi \
+    --conflicts    dovecot-solr \
+    --conflicts    dovecot-dev \
+    --replaces     dovecot-imapd \
+    --replaces     dovecot-pop3d \
+    --replaces     dovecot-lmtpd \
+    --replaces     dovecot-mysql \
+    --replaces     dovecot-pgsql \
+    --replaces     dovecot-sqlite \
+    --replaces     dovecot-ldap \
+    --replaces     dovecot-gssapi \
+    --replaces     dovecot-solr \
     --deb-no-default-config-files \
     --after-install  "$postinst" \
     --after-remove   "$postrm" \
@@ -638,10 +851,16 @@ POSTRM
     | grep -E "(\.so|sieve|managesieve)" \
     | sort | tee -a "$LOG_FILE" || true
 
+  # ---- Sub-Pakete (mysql, pgsql, sqlite, ldap, gssapi, solr, imapd, pop3d, lmtpd)
+  create_sub_packages
+
   # ---- Abschlussmeldung ------------------------------------------------------
   echo ""
   log "===== Fertige Pakete ====="
   find "$PACKAGE_DIR" -maxdepth 1 -name "*.deb" -printf "%s bytes %p\n" | tee -a "$LOG_FILE"
+
+  generate_checksums
+
   echo ""
   echo "HINWEIS: /etc/dovecot ist NICHT in den Paketen."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
@@ -655,6 +874,232 @@ POSTRM
 
   echo "Nächster Schritt:          $0 install"
   echo "Später deinstallieren:     $0 uninstall"
+}
+
+# ------------------------------------------------------------------------------
+# .deb-Pakete: Dovecot Sub-Packages (SQL, LDAP, GSSAPI, Solr, Protokolle)
+#
+# Jede Komponente bekommt ein eigenes .deb, analog zu Ubuntu:
+#   dovecot-custom-mysql, dovecot-custom-pgsql, dovecot-custom-sqlite,
+#   dovecot-custom-ldap, dovecot-custom-gssapi, dovecot-custom-solr,
+#   dovecot-custom-imapd, dovecot-custom-pop3d, dovecot-custom-lmtpd
+#
+# Die .so-Dateien wurden bereits aus dem Core-Staging entfernt.
+# Hier werden sie aus dem originalen Build-Verzeichnis geholt.
+# ------------------------------------------------------------------------------
+create_sub_packages() {
+  local arch
+  arch="$(dpkg --print-architecture)"
+
+  local mod_dir="${STAGE_DOVECOT}/usr/lib/dovecot/modules"
+  local lib_dir="${STAGE_DOVECOT}/usr/lib/dovecot"
+
+  local mod_postinst="/tmp/dovecot-sub-postinst.sh"
+  local mod_postrm="/tmp/dovecot-sub-postrm.sh"
+
+  cat > "$mod_postinst" <<'SUBPOSTINST'
+#!/bin/sh
+set -e
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+SUBPOSTINST
+  chmod 755 "$mod_postinst"
+
+  cat > "$mod_postrm" <<'SUBPOSTRM'
+#!/bin/sh
+set -e
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+SUBPOSTRM
+  chmod 755 "$mod_postrm"
+
+  local pkg_ok=0
+  local pkg_fail=0
+
+  for sp in "${DOVECOT_SUBPACKAGES[@]}"; do
+    local sofind="${SUB_SOFIND[$sp]}"
+    local pkg_name="${SUB_PKGNAME[$sp]}"
+    local desc="${SUB_DESC[$sp]}"
+    local deps="${SUB_DEPS[$sp]}"
+    local conflicts="${SUB_CONFLICTS[$sp]}"
+
+    log "Erstelle Sub-Paket: $pkg_name ($sofind)"
+
+    local sub_stage="/tmp/dovecot-sub-stage-${sp}"
+    rm -rf "$sub_stage"
+    mkdir -p "$sub_stage"
+
+    local found_any=0
+
+    # SQL-Treiber: 3 .so pro Paket (modules/auth/, modules/dict/, modules/)
+    if [ "$sp" = "mysql" ] || [ "$sp" = "pgsql" ] || [ "$sp" = "sqlite" ]; then
+      local driver_name
+      if [ "$sp" = "mysql" ]; then driver_name="mysql"
+      elif [ "$sp" = "pgsql" ]; then driver_name="pgsql"
+      else driver_name="sqlite"
+      fi
+
+      for subdir in "auth" "dict" ""; do
+        local so_path="${mod_dir}/${subdir}/libdriver_${driver_name}.so"
+        if [ -f "$so_path" ]; then
+          mkdir -p "$sub_stage/usr/lib/dovecot/modules/${subdir}"
+          cp "$so_path" "$sub_stage/usr/lib/dovecot/modules/${subdir}/"
+          log "  [OK] modules/${subdir}/libdriver_${driver_name}.so"
+          found_any=1
+        fi
+      done
+    fi
+
+    # LDAP: libauthdb_ldap.so, libdict_ldap.so, libdovecot-ldap.so
+    if [ "$sp" = "ldap" ]; then
+      for f in $(find "$mod_dir" -name "libauthdb_ldap.so" -o -name "libdict_ldap.so" 2>/dev/null); do
+        local rel="${f#$STAGE_DOVECOT}"
+        mkdir -p "$sub_stage$(dirname "$rel")"
+        cp "$f" "$sub_stage$rel"
+        log "  [OK] $(basename "$f")"
+        found_any=1
+      done
+      for f in $(find "$lib_dir" -maxdepth 1 -name "libdovecot-ldap.so*" 2>/dev/null); do
+        local rel="${f#$STAGE_DOVECOT}"
+        mkdir -p "$sub_stage$(dirname "$rel")"
+        cp "$f" "$sub_stage$rel"
+        log "  [OK] $(basename "$f")"
+        found_any=1
+      done
+    fi
+
+    # GSSAPI: libmech_gssapi.so
+    if [ "$sp" = "gssapi" ]; then
+      local gss_so
+      gss_so="$(find "$mod_dir" -name "libmech_gssapi.so" 2>/dev/null | head -1)"
+      if [ -n "$gss_so" ]; then
+        local rel="${gss_so#$STAGE_DOVECOT}"
+        mkdir -p "$sub_stage$(dirname "$rel")"
+        cp "$gss_so" "$sub_stage$rel"
+        log "  [OK] libmech_gssapi.so"
+        found_any=1
+      fi
+    fi
+
+    # Solr: lib21_fts_solr_plugin.so
+    if [ "$sp" = "solr" ]; then
+      local solr_so
+      solr_so="$(find "$mod_dir" -name "lib21_fts_solr_plugin.so" 2>/dev/null | head -1)"
+      if [ -n "$solr_so" ]; then
+        local rel="${solr_so#$STAGE_DOVECOT}"
+        mkdir -p "$sub_stage$(dirname "$rel")"
+        cp "$solr_so" "$sub_stage$rel"
+        log "  [OK] lib21_fts_solr_plugin.so"
+        found_any=1
+      fi
+    fi
+
+    # Protocol packages: imapd, pop3d, lmtpd
+    if [ "$sp" = "imapd" ]; then
+      for b in imap imap-login imap-urlauth imap-urlauth-login imap-urlauth-worker imap-hibernate; do
+        local bin="${lib_dir}/$b"
+        if [ -f "$bin" ]; then
+          mkdir -p "$sub_stage/usr/lib/dovecot"
+          cp "$bin" "$sub_stage/usr/lib/dovecot/"
+          log "  [OK] $b"
+          found_any=1
+        fi
+      done
+      for f in $(find "$mod_dir" -name "lib02_imap_acl_plugin.so" -o -name "lib11_imap_quota_plugin.so" -o -name "lib30_imap_zlib_plugin.so" 2>/dev/null); do
+        local rel="${f#$STAGE_DOVECOT}"
+        mkdir -p "$sub_stage$(dirname "$rel")"
+        cp "$f" "$sub_stage$rel"
+        log "  [OK] $(basename "$f")"
+        found_any=1
+      done
+    elif [ "$sp" = "pop3d" ]; then
+      for b in pop3 pop3-login; do
+        local bin="${lib_dir}/$b"
+        if [ -f "$bin" ]; then
+          mkdir -p "$sub_stage/usr/lib/dovecot"
+          cp "$bin" "$sub_stage/usr/lib/dovecot/"
+          log "  [OK] $b"
+          found_any=1
+        fi
+      done
+      for f in $(find "$mod_dir" -name "libpop3*" 2>/dev/null); do
+        local rel="${f#$STAGE_DOVECOT}"
+        mkdir -p "$sub_stage$(dirname "$rel")"
+        cp "$f" "$sub_stage$rel"
+        log "  [OK] $(basename "$f")"
+        found_any=1
+      done
+    elif [ "$sp" = "lmtpd" ]; then
+      local lmtp_bin="${lib_dir}/lmtp"
+      if [ -f "$lmtp_bin" ]; then
+        mkdir -p "$sub_stage/usr/lib/dovecot"
+        cp "$lmtp_bin" "$sub_stage/usr/lib/dovecot/"
+        log "  [OK] lmtp"
+        found_any=1
+      fi
+      for f in $(find "$mod_dir" -name "liblmtp*" 2>/dev/null); do
+        local rel="${f#$STAGE_DOVECOT}"
+        mkdir -p "$sub_stage$(dirname "$rel")"
+        cp "$f" "$sub_stage$rel"
+        log "  [OK] $(basename "$f")"
+        found_any=1
+      done
+    fi
+
+    if [ "$found_any" -eq 0 ]; then
+      log "  [SKIP] $pkg_name – keine Dateien gefunden ($sofind)"
+      pkg_fail=$((pkg_fail + 1))
+      rm -rf "$sub_stage"
+      continue
+    fi
+
+    # /usr/share/doc/<pkg> anlegen
+    mkdir -p "$sub_stage/usr/share/doc/${pkg_name}"
+
+    local deb_file="$PACKAGE_DIR/${pkg_name}_${DOVECOT_VERSION}_${arch}.deb"
+
+    local fpm_deps=""
+    local dep
+    for dep in $deps; do
+      fpm_deps="$fpm_deps --depends $dep"
+    done
+
+    set +e
+    eval fpm \
+      --input-type   dir \
+      --output-type  deb \
+      --name         "$pkg_name" \
+      --version      "$DOVECOT_VERSION" \
+      --iteration    1 \
+      --architecture "$arch" \
+      --maintainer   "\"local build <root@localhost>\"" \
+      --description  "\"$desc (Dovecot $DOVECOT_VERSION)\"" \
+      $fpm_deps \
+      --conflicts    "$conflicts" \
+      --provides     "$conflicts" \
+      --replaces     "$conflicts" \
+      --deb-no-default-config-files \
+      --after-install  "$mod_postinst" \
+      --after-remove   "$mod_postrm" \
+      --force \
+      --package      "$deb_file" \
+      --chdir        "$sub_stage" \
+      . 2>&1 | tee -a "$LOG_FILE"
+    local fpm_rc=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$fpm_rc" -eq 0 ]; then
+      log "  Erzeugt: $(basename "$deb_file") ($(du -sh "$deb_file" | cut -f1))"
+      pkg_ok=$((pkg_ok + 1))
+    else
+      log "  [FAIL] fpm fuer $pkg_name (Exit $fpm_rc)"
+      pkg_fail=$((pkg_fail + 1))
+    fi
+
+    rm -rf "$sub_stage"
+  done
+
+  log "Sub-Pakete: $pkg_ok erfolgreich, $pkg_fail fehlgeschlagen/uebersprungen"
 }
 
 # ------------------------------------------------------------------------------
@@ -698,10 +1143,21 @@ install_packages() {
   fi
 
   log "Installiere: $(basename "$deb_core")"
-  dpkg -i "$deb_core"
+  DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i "$deb_core"
 
   log "Installiere: $(basename "$deb_sieve")"
-  dpkg -i "$deb_sieve"
+  DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i "$deb_sieve"
+
+  # Sub-Pakete installieren
+  local deb_subs
+  deb_subs=$(find "$PACKAGE_DIR" -maxdepth 1 -name "dovecot-custom-*_*.deb" 2>/dev/null | sort || true)
+  if [ -n "$deb_subs" ]; then
+    log "Installiere Sub-Pakete..."
+    for deb_sub in $deb_subs; do
+      log "  $(basename "$deb_sub")"
+    done
+    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i $deb_subs 2>&1 | tee -a "$LOG_FILE" || true
+  fi
 
   # Abhängigkeiten nachziehen falls nötig
   apt-get install -f -y || true
@@ -862,6 +1318,13 @@ restore_from_backup() {
   systemctl stop dovecot 2>/dev/null || true
 
   # Custom-Pakete zuerst deinstallieren
+  for sp in "${DOVECOT_SUBPACKAGES[@]}"; do
+    local pkg="${SUB_PKGNAME[$sp]}"
+    if dpkg -s "$pkg" >/dev/null 2>&1; then
+      log "Deinstalliere $pkg"
+      dpkg -r "$pkg" || true
+    fi
+  done
   for pkg in dovecot-pigeonhole-custom dovecot-core-custom; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
       log "Deinstalliere $pkg"
@@ -999,6 +1462,13 @@ check_config() {
 uninstall_cmd() {
   log "Deinstalliere Custom-Pakete"
   systemctl stop dovecot 2>/dev/null || true
+  for sp in "${DOVECOT_SUBPACKAGES[@]}"; do
+    local pkg="${SUB_PKGNAME[$sp]}"
+    if dpkg -s "$pkg" >/dev/null 2>&1; then
+      dpkg -r "$pkg" || true
+      log "$pkg entfernt"
+    fi
+  done
   for pkg in dovecot-pigeonhole-custom dovecot-core-custom; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
       dpkg -r "$pkg"
@@ -1046,23 +1516,103 @@ package_dovecot() {
   make install DESTDIR="$STAGE_DOVECOT"
   rm -rf "${STAGE_DOVECOT}/etc/dovecot"
 
+  # Gzip man pages
+  find "${STAGE_DOVECOT}/usr/share/man" -type f -name '*.?' ! -name '*.gz' -exec gzip -f {} \; 2>/dev/null || true
+
+  # tmpfiles.d: Runtime-Verzeichnisse bei Bedarf erzeugen (wie offizielle Pakete)
+  mkdir -p "${STAGE_DOVECOT}/usr/lib/tmpfiles.d"
+  cat > "${STAGE_DOVECOT}/usr/lib/tmpfiles.d/dovecot-custom.conf" <<'TMPEOF'
+# Dovecot runtime directories
+d /run/dovecot 0755 dovecot dovecot -
+d /run/dovecot/login 0755 dovenull dovenull -
+d /var/run/dovecot 0755 dovecot dovecot -
+d /var/run/dovecot/login 0755 dovenull dovenull -
+TMPEOF
+
+  # Systemd-Hardening: Schutzmechanismen wie offizielle Ubuntu-Pakete
+  if [ -f "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service" ]; then
+    sed -i '/^\[Service\]/a LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true' \
+      "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service"
+    log "Systemd-Hardening angewendet"
+  fi
+
   log "Staging-Inhalt (relevante Dateien):"
   find "$STAGE_DOVECOT" \( -name "dovecot" -o -name "doveadm" -o -name "dovecot-config"     -o -name "*.so" -o -name "dovecot.service" \) | sort | tee -a "$LOG_FILE"
 
   # postinst/postrm Scripts
   local postinst="/tmp/dovecot-postinst.sh"
   local postrm="/tmp/dovecot-postrm.sh"
-  printf '#!/bin/sh
+
+  cat > "$postinst" <<'POSTINST'
+#!/bin/sh
 set -e
+
+if ! id -u dovecot >/dev/null 2>&1; then
+  adduser --system --group --home /var/run/dovecot --no-create-home \
+    --gecos "Dovecot Mail Server" --shell /usr/sbin/nologin dovecot 2>/dev/null || true
+fi
+if ! id -u dovenull >/dev/null 2>&1; then
+  adduser --system --group --home /var/run/dovecot --no-create-home \
+    --gecos "Dovecot Login User" --shell /usr/sbin/nologin dovenull 2>/dev/null || true
+fi
+
+# Generate DH parameters if missing
+if [ ! -f /etc/dovecot/dh.pem ] && command -v openssl >/dev/null 2>&1; then
+  openssl dhparam -out /etc/dovecot/dh.pem 2048 2>/dev/null &
+fi
+
+mkdir -p /var/run/dovecot /var/lib/dovecot
+chown dovecot:dovecot /var/lib/dovecot 2>/dev/null || true
+
+# Copy default configs on fresh install
+if [ ! -f /etc/dovecot/dovecot.conf ]; then
+  echo "INFO: Keine dovecot.conf gefunden – installiere Default-Konfiguration"
+  if [ -d /usr/share/dovecot ]; then
+    cp -a /usr/share/dovecot/dovecot.conf /etc/dovecot/dovecot.conf 2>/dev/null || true
+    mkdir -p /etc/dovecot/conf.d
+    if [ -d /usr/share/dovecot/conf.d ]; then
+      for f in /usr/share/dovecot/conf.d/*.conf; do
+        [ -f "$f" ] && cp -a "$f" /etc/dovecot/conf.d/ 2>/dev/null || true
+      done
+    fi
+  fi
+  # Generate DH params if missing
+  if [ ! -f /etc/dovecot/dh.pem ] && command -v openssl >/dev/null 2>&1; then
+    openssl dhparam -out /etc/dovecot/dh.pem 2048 2>/dev/null &
+  fi
+fi
+
+# Create PAM config for dovecot if missing
+if [ ! -f /etc/pam.d/dovecot ]; then
+  echo "auth    required        pam_unix.so    nullok" > /etc/pam.d/dovecot
+  echo "account required        pam_unix.so" >> /etc/pam.d/dovecot
+fi
+
+# Create /etc/default/dovecot if missing
+if [ ! -f /etc/default/dovecot ]; then
+  echo "# Dovecot startup configuration" > /etc/default/dovecot
+  echo "ENABLED=1" >> /etc/default/dovecot
+fi
+
 ldconfig
-command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-' > "$postinst"
-  printf '#!/bin/sh
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+fi
+command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom || true
+POSTINST
+  chmod 755 "$postinst"
+
+  cat > "$postrm" <<'POSTRM'
+#!/bin/sh
 set -e
+
+command -v apt-mark >/dev/null 2>&1 && apt-mark unhold dovecot-core-custom 2>/dev/null || true
 ldconfig
-command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-' > "$postrm"
-  chmod 755 "$postinst" "$postrm"
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+fi
+POSTRM
+  chmod 755 "$postrm"
 
   local deb_core="$PACKAGE_DIR/dovecot-core-custom_${DOVECOT_VERSION}_${arch}.deb"
   fpm \
@@ -1083,6 +1633,28 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
     --conflicts    dovecot-core \
     --provides     dovecot-core \
     --replaces     dovecot-core \
+    --conflicts    dovecot-imapd \
+    --conflicts    dovecot-pop3d \
+    --conflicts    dovecot-lmtpd \
+    --conflicts    dovecot-mysql \
+    --conflicts    dovecot-pgsql \
+    --conflicts    dovecot-sqlite \
+    --conflicts    dovecot-ldap \
+    --conflicts    dovecot-dev \
+    --provides     dovecot-imapd \
+    --provides     dovecot-pop3d \
+    --provides     dovecot-lmtpd \
+    --provides     dovecot-mysql \
+    --provides     dovecot-pgsql \
+    --provides     dovecot-sqlite \
+    --provides     dovecot-ldap \
+    --replaces     dovecot-imapd \
+    --replaces     dovecot-pop3d \
+    --replaces     dovecot-lmtpd \
+    --replaces     dovecot-mysql \
+    --replaces     dovecot-pgsql \
+    --replaces     dovecot-sqlite \
+    --replaces     dovecot-ldap \
     --deb-no-default-config-files \
     --after-install  "$postinst" \
     --after-remove   "$postrm" \
@@ -1234,7 +1806,138 @@ package_all() {
   build_dovecot
   build_pigeonhole
   create_deb_packages
+  create_dovecot_dev_package
+  create_dovecot_doc_package
   log "=== Paket-Build abgeschlossen ==="
+}
+
+# ------------------------------------------------------------------------------
+# .deb-Paket: dovecot-custom-dev (Header-Dateien + dovecot-config)
+# ------------------------------------------------------------------------------
+create_dovecot_dev_package() {
+  local arch
+  arch="$(dpkg --print-architecture)"
+
+  local dev_stage="/tmp/dovecot-dev-stage"
+  rm -rf "$dev_stage"
+  mkdir -p "$dev_stage"
+
+  # Header aus dem Staging kopieren (wurden mit make install installiert)
+  local staging_inc="${STAGE_DOVECOT}/usr/include/dovecot"
+  if [ -d "$staging_inc" ]; then
+    mkdir -p "$dev_stage/usr/include"
+    cp -a "$staging_inc" "$dev_stage/usr/include/"
+    local hdr_count
+    hdr_count=$(find "$dev_stage/usr/include" -name "*.h" | wc -l)
+    log "Dovecot dev: $hdr_count Header-Dateien kopiert"
+  else
+    log "SKIP dovecot-custom-dev – keine Header im Staging"
+    rm -rf "$dev_stage"
+    return 0
+  fi
+
+  # dovecot-config (wird von Pigeonhole und anderen Plugins benötigt)
+  local dconfig="${STAGE_DOVECOT}/usr/lib/dovecot/dovecot-config"
+  if [ -f "$dconfig" ]; then
+    mkdir -p "$dev_stage/usr/lib/dovecot"
+    cp "$dconfig" "$dev_stage/usr/lib/dovecot/"
+    log "Dovecot dev: dovecot-config kopiert"
+  fi
+
+  mkdir -p "$dev_stage/usr/share/doc/dovecot-custom-dev"
+
+  local deb_file="$PACKAGE_DIR/dovecot-custom-dev_${DOVECOT_VERSION}_${arch}.deb"
+  log "Erstelle $(basename "$deb_file")"
+
+  fpm \
+    --input-type   dir \
+    --output-type  deb \
+    --name         dovecot-custom-dev \
+    --version      "$DOVECOT_VERSION" \
+    --iteration    1 \
+    --architecture "$arch" \
+    --maintainer   "local build <root@localhost>" \
+    --description  "Dovecot $DOVECOT_VERSION – development headers and dovecot-config" \
+    --depends      dovecot-core-custom \
+    --conflicts    dovecot-dev \
+    --provides     dovecot-dev \
+    --replaces     dovecot-dev \
+    --deb-no-default-config-files \
+    --force \
+    --package      "$deb_file" \
+    --chdir        "$dev_stage" \
+    .
+
+  log "Erzeugt: $(basename "$deb_file") ($(du -sh "$deb_file" | cut -f1))"
+  rm -rf "$dev_stage"
+}
+
+# ------------------------------------------------------------------------------
+# .deb-Paket: dovecot-custom-doc (Dokumentation)
+# ------------------------------------------------------------------------------
+create_dovecot_doc_package() {
+  local arch
+  arch="$(dpkg --print-architecture)"
+
+  local doc_stage="/tmp/dovecot-doc-stage"
+  rm -rf "$doc_stage"
+  mkdir -p "$doc_stage"
+
+  local doc_dir="${STAGE_DOVECOT}/usr/share/doc/dovecot"
+  local doc_count=0
+  if [ -d "$doc_dir" ]; then
+    mkdir -p "$doc_stage/usr/share/doc/dovecot"
+    cp -a "$doc_dir"/* "$doc_stage/usr/share/doc/dovecot/" 2>/dev/null || true
+    doc_count=$(find "$doc_stage" -type f | wc -l)
+  fi
+
+  # Man-pages als gz aus dem Staging kopieren
+  local man_dir="${STAGE_DOVECOT}/usr/share/man"
+  if [ -d "$man_dir" ]; then
+    mkdir -p "$doc_stage/usr/share/man"
+    cp -a "$man_dir"/* "$doc_stage/usr/share/man/" 2>/dev/null || true
+  fi
+
+  # Beispiel-Konfigurationen aus /usr/share/dovecot
+  local share_dir="${STAGE_DOVECOT}/usr/share/dovecot"
+  if [ -d "$share_dir" ]; then
+    mkdir -p "$doc_stage/usr/share/dovecot"
+    cp -a "$share_dir"/*.conf "$doc_stage/usr/share/dovecot/" 2>/dev/null || true
+    cp -a "$share_dir"/*.ext "$doc_stage/usr/share/dovecot/" 2>/dev/null || true
+    if [ -d "$share_dir/conf.d" ]; then
+      mkdir -p "$doc_stage/usr/share/dovecot/conf.d"
+      cp -a "$share_dir/conf.d"/*.conf "$doc_stage/usr/share/dovecot/conf.d/" 2>/dev/null || true
+    fi
+    doc_count=$(find "$doc_stage" -type f | wc -l)
+  fi
+
+  if [ "$doc_count" -eq 0 ]; then
+    log "SKIP dovecot-custom-doc – keine Dokumentation gefunden"
+    rm -rf "$doc_stage"
+    return 0
+  fi
+
+  local deb_file="$PACKAGE_DIR/dovecot-custom-doc_${DOVECOT_VERSION}_${arch}.deb"
+  log "Erstelle $(basename "$deb_file")"
+
+  fpm \
+    --input-type   dir \
+    --output-type  deb \
+    --name         dovecot-custom-doc \
+    --version      "$DOVECOT_VERSION" \
+    --iteration    1 \
+    --architecture "$arch" \
+    --maintainer   "local build <root@localhost>" \
+    --description  "Dovecot $DOVECOT_VERSION – documentation and example configs" \
+    --depends      dovecot-core-custom \
+    --deb-no-default-config-files \
+    --force \
+    --package      "$deb_file" \
+    --chdir        "$doc_stage" \
+    .
+
+  log "Erzeugt: $(basename "$deb_file") ($(du -sh "$deb_file" | cut -f1))"
+  rm -rf "$doc_stage"
 }
 
 # ------------------------------------------------------------------------------

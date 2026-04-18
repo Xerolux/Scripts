@@ -35,6 +35,81 @@ POSTFIX_TARBALL_URLS=(
   "http://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
 )
 
+# ------------------------------------------------------------------------------
+# Postfix Map-Package-Definitionen
+#
+# Mit dynamicmaps=yes baut Postfix Map-Typen als dynamische .so-Module.
+# Diese werden als separate .deb-Pakete verpackt, analog zu den offiziellen
+# Ubuntu-Paketen (postfix-mysql, postfix-pgsql, postfix-ldap, usw.).
+#
+# Jede Map hat:
+#   MAP_SONAME   – Name der .so-Datei (in /usr/lib/postfix/)
+#   MAP_PKGNAME  – .deb-Paketname
+#   MAP_DESC     – Kurzbeschreibung
+#   MAP_DEPS     – Zusaetzliche Paket-Abhaengigkeiten (Leerzeichen-getrennt)
+#   MAP_CONFLICTS – Offizielles Ubuntu-Paket das ersetzt wird
+# ------------------------------------------------------------------------------
+declare -A MAP_SONAME MAP_PKGNAME MAP_DESC MAP_DEPS MAP_CONFLICTS
+
+# --- MySQL/MariaDB -----------------------------------------------------------
+MAP_SONAME[mysql]="postfix-mysql.so"
+MAP_PKGNAME[mysql]="postfix-custom-mysql"
+MAP_DESC[mysql]="MySQL map support for Postfix"
+MAP_DEPS[mysql]="postfix-custom libmariadb3"
+MAP_CONFLICTS[mysql]="postfix-mysql"
+
+# --- PostgreSQL ---------------------------------------------------------------
+MAP_SONAME[pgsql]="postfix-pgsql.so"
+MAP_PKGNAME[pgsql]="postfix-custom-pgsql"
+MAP_DESC[pgsql]="PostgreSQL map support for Postfix"
+MAP_DEPS[pgsql]="postfix-custom libpq5"
+MAP_CONFLICTS[pgsql]="postfix-pgsql"
+
+# --- LDAP ---------------------------------------------------------------------
+MAP_SONAME[ldap]="postfix-ldap.so"
+MAP_PKGNAME[ldap]="postfix-custom-ldap"
+MAP_DESC[ldap]="LDAP map support for Postfix"
+MAP_DEPS[ldap]="postfix-custom libldap-2.5-0"
+MAP_CONFLICTS[ldap]="postfix-ldap"
+
+# --- SQLite -------------------------------------------------------------------
+MAP_SONAME[sqlite]="postfix-sqlite.so"
+MAP_PKGNAME[sqlite]="postfix-custom-sqlite"
+MAP_DESC[sqlite]="SQLite map support for Postfix"
+MAP_DEPS[sqlite]="postfix-custom libsqlite3-0"
+MAP_CONFLICTS[sqlite]="postfix-sqlite"
+
+# --- PCRE ---------------------------------------------------------------------
+MAP_SONAME[pcre]="postfix-pcre.so"
+MAP_PKGNAME[pcre]="postfix-custom-pcre"
+MAP_DESC[pcre]="PCRE map support for Postfix"
+MAP_DEPS[pcre]="postfix-custom libpcre2-8-0"
+MAP_CONFLICTS[pcre]="postfix-pcre"
+
+# --- LMDB ---------------------------------------------------------------------
+MAP_SONAME[lmdb]="postfix-lmdb.so"
+MAP_PKGNAME[lmdb]="postfix-custom-lmdb"
+MAP_DESC[lmdb]="LMDB map support for Postfix"
+MAP_DEPS[lmdb]="postfix-custom liblmdb0"
+MAP_CONFLICTS[lmdb]="postfix-lmdb"
+
+# --- CDB ----------------------------------------------------------------------
+MAP_SONAME[cdb]="postfix-cdb.so"
+MAP_PKGNAME[cdb]="postfix-custom-cdb"
+MAP_DESC[cdb]="CDB map support for Postfix"
+MAP_DEPS[cdb]="postfix-custom libcdb1"
+MAP_CONFLICTS[cdb]="postfix-cdb"
+
+MAP_TYPES=(
+  mysql
+  pgsql
+  ldap
+  sqlite
+  pcre
+  lmdb
+  cdb
+)
+
 # Installationspfade (passend zu bestehender ISPConfig-Installation)
 # Diese werden in der Funktion create_deb_package direkt verwendet
 # ------------------------------------------------------------------------------
@@ -384,6 +459,19 @@ build_postfix() {
 }
 
 # ------------------------------------------------------------------------------
+# SHA256-Checksummen fuer alle erzeugten .deb-Pakete
+# ------------------------------------------------------------------------------
+generate_checksums() {
+  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+    log "Erstelle SHA256SUMS fuer Pakete..."
+    cd "$PACKAGE_DIR"
+    sha256sum *.deb > SHA256SUMS
+    log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
+    cat SHA256SUMS | tee -a "$LOG_FILE"
+  fi
+}
+
+# ------------------------------------------------------------------------------
 # .deb-Paket erstellen via fpm
 #
 # Postfix hat kein DESTDIR-Konzept wie autotools-Projekte.
@@ -426,16 +514,27 @@ create_deb_package() {
   unset LD_LIBRARY_PATH
   [ "$inst_rc" -eq 0 ] || die "postfix-install fehlgeschlagen (Exit $inst_rc)"
 
+  # Gzip man pages
+  find "${STAGE_POSTFIX}/usr/share/man" -type f -name '*.?' ! -name '*.gz' -exec gzip -f {} \; 2>/dev/null || true
+
   # /etc/postfix aus Staging – nur Konfigurationsdateien entfernen,
   # Meta-Files (postfix.service, postfix-files, post-install, postfix-script)
   # behalten – sie werden fuer den Betrieb benoetigt.
   if [ -d "${STAGE_POSTFIX}/etc/postfix" ]; then
     cd "${STAGE_POSTFIX}/etc/postfix"
+    # Backup dynamicmaps.cf before removing *.cf files
+    if [ -f dynamicmaps.cf ]; then
+      cp dynamicmaps.cf dynamicmaps.cf.dpkg-backup
+    fi
     for f in *.cf *.proto ACCESS aliases canonical \
              generic header_checks relocated transport \
              virtual mime_types; do
       rm -f "$f" 2>/dev/null || true
     done
+    # Restore critical meta files if they were removed
+    if [ -f dynamicmaps.cf.dpkg-backup ]; then
+      mv dynamicmaps.cf.dpkg-backup dynamicmaps.cf
+    fi
     cd "$BUILD_ROOT"
     log "/etc/postfix: Konfig-Dateien entfernt, Meta-Files behalten"
   fi
@@ -444,6 +543,33 @@ create_deb_package() {
   log "Staging-Inhalt (relevante Dateien):"
   find "$STAGE_POSTFIX" \( -name "postfix" -o -name "postconf" -o -name "smtpd" \
     -o -name "*.so" -o -name "postfix.service" \) | sort | tee -a "$LOG_FILE"
+
+  # Systemd-Unit: von meta_directory nach /lib/systemd/system kopieren
+  if [ -f "${STAGE_POSTFIX}/etc/postfix/postfix.service" ]; then
+    mkdir -p "${STAGE_POSTFIX}/lib/systemd/system"
+    cp "${STAGE_POSTFIX}/etc/postfix/postfix.service" "${STAGE_POSTFIX}/lib/systemd/system/postfix.service"
+    log "Systemd-Unit nach /lib/systemd/system kopiert"
+
+    # Hardening-Einstellungen in der [Service]-Sektion ergaenzen
+    local svc="${STAGE_POSTFIX}/lib/systemd/system/postfix.service"
+    if grep -q '\[Service\]' "$svc"; then
+      sed -i '/\[Service\]/a\LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true\nNoNewPrivileges=false' "$svc"
+      log "Systemd-Unit: Hardening-Einstellungen hinzugefuegt"
+    fi
+
+    # Original in /etc/postfix behalten (Postfix benoetigt ihn dort)
+  fi
+
+  # tmpfiles.d Konfiguration fuer Runtime-Verzeichnisse
+  mkdir -p "${STAGE_POSTFIX}/usr/lib/tmpfiles.d"
+  cat > "${STAGE_POSTFIX}/usr/lib/tmpfiles.d/postfix-custom.conf" <<'EOF'
+# Postfix runtime directories
+d /run/postfix 2775 postfix postdrop -
+d /var/spool/postfix 2775 postfix postdrop -
+d /var/spool/postfix/maildrop 1730 postfix postdrop -
+d /var/spool/postfix/public 2755 postfix postdrop -
+EOF
+  log "tmpfiles.d/postfix-custom.conf erstellt"
 
   # Post-Install / Post-Remove Scripts
   local postinst="/tmp/postfix-postinst.sh"
@@ -481,7 +607,47 @@ if [ ! -f /etc/logrotate.d/postfix-custom ]; then
 LR
 fi
 
-ldconfig
+# Create chroot structure for postfix
+if [ -d /var/spool/postfix ]; then
+  mkdir -p /var/spool/postfix/etc
+  mkdir -p /var/spool/postfix/dev
+  mkdir -p /var/spool/postfix/usr/lib
+  for f in /etc/localtime /etc/nsswitch.conf /etc/resolv.conf /etc/hosts /etc/services; do
+    [ -f "$f" ] && cp "$f" /var/spool/postfix${f} 2>/dev/null || true
+  done
+fi
+
+  # Build initial alias database
+  if [ -f /etc/postfix/aliases ] || [ -f /etc/aliases ]; then
+    command -v newaliases >/dev/null 2>&1 && newaliases 2>/dev/null || true
+  fi
+
+  # Copy default Postfix configs on fresh install
+  if [ ! -f /etc/postfix/main.cf ]; then
+    echo "INFO: Keine main.cf gefunden – installiere Default-Konfiguration"
+    if [ -f /usr/share/postfix/main.cf.dist ]; then
+      cp /usr/share/postfix/main.cf.dist /etc/postfix/main.cf
+    fi
+    if [ -f /usr/share/postfix/master.cf.dist ]; then
+      cp /usr/share/postfix/master.cf.dist /etc/postfix/master.cf
+    fi
+    # Run basic postconf for default settings
+    command -v postconf >/dev/null 2>&1 && {
+      postconf -e "myhostname = $(hostname -f 2>/dev/null || hostname)"
+      postconf -e "mydestination = \$myhostname, localhost.localdomain, localhost"
+      postconf -e "inet_interfaces = all"
+      postconf -e "inet_protocols = all"
+    } || true
+    # Build alias database
+    command -v newaliases >/dev/null 2>&1 && newaliases 2>/dev/null || true
+  fi
+
+  # Create rsyslog config for postfix if missing
+  if [ ! -f /etc/rsyslog.d/postfix.conf ] && [ -d /etc/rsyslog.d ]; then
+    echo "mail.* -/var/log/mail.log" > /etc/rsyslog.d/postfix-custom.conf 2>/dev/null || true
+  fi
+
+  ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
 
 # apt-mark hold – verhindert ueberschreiben durch apt upgrade
@@ -503,6 +669,31 @@ POSTRM
   local deb_file="$PACKAGE_DIR/postfix-custom_${POSTFIX_VERSION}_${arch}.deb"
   log "Erstelle $(basename "$deb_file")"
 
+  # Map-.so aus Core-Staging entfernen – die kommen in eigene Pakete
+  local shlib_dir="${STAGE_POSTFIX}/usr/lib/postfix"
+  if [ -d "$shlib_dir" ]; then
+    local map_so_count=0
+    for m in "${MAP_TYPES[@]}"; do
+      local soname="${MAP_SONAME[$m]}"
+      if [ -f "$shlib_dir/$soname" ]; then
+        log "Verschiebe $soname aus Core-Staging"
+        rm -f "$shlib_dir/$soname"
+        map_so_count=$((map_so_count + 1))
+      fi
+    done
+    log "$map_so_count Map-.so aus Core-Staging entfernt"
+  fi
+
+  # dynamicmaps.cf patchen: nur noch Core-Eintraege behalten
+  if [ -f "${STAGE_POSTFIX}/etc/postfix/dynamicmaps.cf" ]; then
+    local dmcfg="${STAGE_POSTFIX}/etc/postfix/dynamicmaps.cf"
+    for m in "${MAP_TYPES[@]}"; do
+      local soname="${MAP_SONAME[$m]}"
+      sed -i "/${soname}/d" "$dmcfg" 2>/dev/null || true
+    done
+    log "dynamicmaps.cf: Map-Eintraege entfernt (werden in Map-Pakete ausgelagert)"
+  fi
+
   fpm \
     --input-type   dir \
     --output-type  deb \
@@ -511,17 +702,10 @@ POSTRM
     --iteration    1 \
     --architecture "$arch" \
     --maintainer   "local build <root@localhost>" \
-    --description  "Postfix MTA $POSTFIX_VERSION – custom build (ISPConfig/MariaDB/SASL/LMDB/TLS)" \
+    --description  "Postfix MTA $POSTFIX_VERSION – custom build (ISPConfig/SASL/TLS)" \
     --depends      "libssl3 | libssl3t64" \
     --depends      "libsasl2-2 | libsasl2-2t64" \
-    --depends      "libmariadb3 | libmariadb3t64" \
-    --depends      "libldap-2.5-0 | libldap-2.5-0t64" \
-    --depends      libpcre2-8-0 \
-    --depends      liblmdb0 \
-    --depends      "libsqlite3-0 | libsqlite3-0t64" \
     --depends      libicu74 \
-    --depends      "libcdb1 | libcdb1t64 | tinycdb" \
-    --depends      "libpq5 | libpq5t64" \
     --conflicts    postfix \
     --provides     postfix \
     --replaces     postfix \
@@ -538,7 +722,7 @@ POSTRM
   # Paketinhalt verifizieren
   log "Paketinhalt-Verifikation:"
   dpkg-deb --contents "$deb_file" | awk '{print $NF}' \
-    | grep -E "(postfix$|postconf|smtpd|\.so|postfix\.service)" \
+    | grep -E "(postfix$|postconf|smtpd|postfix\.service)" \
     | sort | tee -a "$LOG_FILE" || true
 
   # Map-Typen prüfen
@@ -547,6 +731,9 @@ POSTRM
   echo ""
   log "===== Paket fertig ====="
   find "$deb_file" -maxdepth 0 -printf "%s bytes %p\n" | tee -a "$LOG_FILE"
+
+  generate_checksums
+
   echo ""
   echo "HINWEIS: /etc/postfix ist NICHT im Paket."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
@@ -559,6 +746,203 @@ POSTRM
   fi
 
   echo "Nächster Schritt: $0 install"
+}
+
+# ------------------------------------------------------------------------------
+# .deb-Pakete: Postfix Map-Module (separat)
+#
+# Jede dynamisch geladene Map (mysql, pgsql, ldap, sqlite, pcre, lmdb, cdb)
+# bekommt ein eigenes .deb-Paket.
+#
+# Struktur pro Paket:
+#   /usr/lib/postfix/<soname>          – Shared Object
+#   /usr/share/postfix/dynamicmaps.d/<soname>.cf – dynamicmaps Eintrag
+#
+# Nach der Installation traegt postinst den Map-Typ in dynamicmaps.cf ein.
+# ------------------------------------------------------------------------------
+create_map_packages() {
+  local arch
+  arch="$(dpkg --print-architecture)"
+
+  local build_dir="$BUILD_ROOT/postfix-${POSTFIX_VERSION}"
+  local shlib_dir="${STAGE_POSTFIX}/usr/lib/postfix"
+
+  # Map-.so koennen im Staging liegen (wurden dort ggf. schon entfernt)
+  # oder im Build-Verzeichnis unter lib/
+  local map_src_dir="$build_dir/lib"
+
+  local mod_postinst="/tmp/postfix-map-postinst.sh"
+  local mod_postrm="/tmp/postfix-map-postrm.sh"
+
+  cat > "$mod_postinst" <<'MAPPOSTINST'
+#!/bin/sh
+set -e
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+MAPPOSTINST
+  chmod 755 "$mod_postinst"
+
+  cat > "$mod_postrm" <<'MAPPOSTRM'
+#!/bin/sh
+set -e
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+MAPPOSTRM
+  chmod 755 "$mod_postrm"
+
+  local pkg_ok=0
+  local pkg_fail=0
+
+  for m in "${MAP_TYPES[@]}"; do
+    local soname="${MAP_SONAME[$m]}"
+    local pkg_name="${MAP_PKGNAME[$m]}"
+    local desc="${MAP_DESC[$m]}"
+    local deps="${MAP_DEPS[$m]}"
+    local conflicts="${MAP_CONFLICTS[$m]}"
+
+    log "Erstelle Map-Paket: $pkg_name"
+
+    # .so finden: zuerst im Build-lib-Verzeichnis, dann im Staging
+    local so_src=""
+    if [ -f "$map_src_dir/$soname" ]; then
+      so_src="$map_src_dir/$soname"
+    elif [ -f "$shlib_dir/$soname" ]; then
+      so_src="$shlib_dir/$soname"
+    fi
+
+    if [ -z "$so_src" ]; then
+      log "  [SKIP] $pkg_name – $soname nicht gefunden"
+      pkg_fail=$((pkg_fail + 1))
+      continue
+    fi
+
+    local map_stage="/tmp/postfix-map-stage-${m}"
+    rm -rf "$map_stage"
+    mkdir -p "$map_stage/usr/lib/postfix"
+    mkdir -p "$map_stage/usr/share/doc/${pkg_name}"
+    mkdir -p "$map_stage/usr/share/postfix/dynamicmaps.d"
+
+    cp "$so_src" "$map_stage/usr/lib/postfix/"
+    log "  [OK] $soname"
+
+    # dynamicmaps.d Eintrag erstellen
+    # Format: maptype  soname  path-to-driver  make(1)  flags
+    local maptype
+    maptype="${soname#postfix-}"
+    maptype="${maptype%.so}"
+    echo "${maptype}\t${soname}\t/usr/lib/postfix/${soname}\tdict_${maptype}_open\t${maptype}" \
+      > "$map_stage/usr/share/postfix/dynamicmaps.d/${soname}.cf"
+
+    # Man page (falls vorhanden)
+    local man_file="$build_dir/man/man5/${maptype}_table.5"
+    if [ -f "$man_file" ]; then
+      mkdir -p "$map_stage/usr/share/man/man5"
+      cp "$man_file" "$map_stage/usr/share/man/man5/${maptype}_table.5"
+      gzip -f "$map_stage/usr/share/man/man5/${maptype}_table.5" 2>/dev/null || true
+    fi
+
+    local deb_file="$PACKAGE_DIR/${pkg_name}_${POSTFIX_VERSION}_${arch}.deb"
+
+    local fpm_deps=""
+    local dep
+    for dep in $deps; do
+      fpm_deps="$fpm_deps --depends $dep"
+    done
+
+    set +e
+    eval fpm \
+      --input-type   dir \
+      --output-type  deb \
+      --name         "$pkg_name" \
+      --version      "$POSTFIX_VERSION" \
+      --iteration    1 \
+      --architecture "$arch" \
+      --maintainer   "\"local build <root@localhost>\"" \
+      --description  "\"$desc (Postfix $POSTFIX_VERSION)\"" \
+      $fpm_deps \
+      --conflicts    "$conflicts" \
+      --provides     "$conflicts" \
+      --replaces     "$conflicts" \
+      --deb-no-default-config-files \
+      --after-install  "$mod_postinst" \
+      --after-remove   "$mod_postrm" \
+      --force \
+      --package      "$deb_file" \
+      --chdir        "$map_stage" \
+      . 2>&1 | tee -a "$LOG_FILE"
+    local fpm_rc=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$fpm_rc" -eq 0 ]; then
+      log "  Erzeugt: $(basename "$deb_file") ($(du -sh "$deb_file" | cut -f1))"
+      pkg_ok=$((pkg_ok + 1))
+    else
+      log "  [FAIL] fpm fuer $pkg_name (Exit $fpm_rc)"
+      pkg_fail=$((pkg_fail + 1))
+    fi
+
+    rm -rf "$map_stage"
+  done
+
+  log "Map-Pakete: $pkg_ok erfolgreich, $pkg_fail fehlgeschlagen/uebersprungen"
+}
+
+# ------------------------------------------------------------------------------
+# .deb-Paket: postfix-custom-dev (Header-Dateien)
+#
+# Enthaelt die Postfix-Include-Header fuer die Entwicklung von
+# Postfix-Plugins und Third-Party-Erweiterungen.
+# ------------------------------------------------------------------------------
+create_dev_package() {
+  local arch
+  arch="$(dpkg --print-architecture)"
+
+  local build_dir="$BUILD_ROOT/postfix-${POSTFIX_VERSION}"
+  local dev_stage="/tmp/postfix-dev-stage"
+  rm -rf "$dev_stage"
+  mkdir -p "$dev_stage/usr/include/postfix"
+  mkdir -p "$dev_stage/usr/share/doc/postfix-custom-dev"
+
+  # Header aus dem Quellverzeichnis kopieren
+  local hdr_count=0
+  for h in "$build_dir"/src/include/*.h; do
+    if [ -f "$h" ]; then
+      cp "$h" "$dev_stage/usr/include/postfix/"
+      hdr_count=$((hdr_count + 1))
+    fi
+  done
+  log "Postfix dev: $hdr_count Header-Dateien kopiert"
+
+  if [ "$hdr_count" -eq 0 ]; then
+    log "SKIP postfix-custom-dev – keine Header-Dateien gefunden"
+    rm -rf "$dev_stage"
+    return 0
+  fi
+
+  local deb_file="$PACKAGE_DIR/postfix-custom-dev_${POSTFIX_VERSION}_${arch}.deb"
+  log "Erstelle $(basename "$deb_file")"
+
+  fpm \
+    --input-type   dir \
+    --output-type  deb \
+    --name         postfix-custom-dev \
+    --version      "$POSTFIX_VERSION" \
+    --iteration    1 \
+    --architecture "$arch" \
+    --maintainer   "local build <root@localhost>" \
+    --description  "Postfix $POSTFIX_VERSION – development headers" \
+    --depends      postfix-custom \
+    --conflicts    postfix-dev \
+    --provides     postfix-dev \
+    --replaces     postfix-dev \
+    --deb-no-default-config-files \
+    --force \
+    --package      "$deb_file" \
+    --chdir        "$dev_stage" \
+    .
+
+  log "Erzeugt: $(basename "$deb_file") ($(du -sh "$deb_file" | cut -f1))"
+  rm -rf "$dev_stage"
 }
 
 # ------------------------------------------------------------------------------
@@ -625,7 +1009,18 @@ install_packages() {
   fi
 
   log "Installiere: $(basename "$deb_file")"
-  dpkg -i "$deb_file"
+  DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i "$deb_file"
+
+  # Map-Pakete installieren
+  local deb_maps
+  deb_maps=$(find "$PACKAGE_DIR" -maxdepth 1 -name "postfix-custom-*_*.deb" 2>/dev/null | sort || true)
+  if [ -n "$deb_maps" ]; then
+    log "Installiere Map-Pakete..."
+    for deb_map in $deb_maps; do
+      log "  $(basename "$deb_map")"
+    done
+    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i $deb_maps 2>&1 | tee -a "$LOG_FILE" || true
+  fi
 
   # Fehlende Abhängigkeiten nachziehen
   apt-get install -f -y || true
@@ -781,8 +1176,19 @@ check_config() {
 }
 
 uninstall_cmd() {
-  log "Deinstalliere postfix-custom"
+  log "Deinstalliere postfix-custom Pakete"
   systemctl stop postfix 2>/dev/null || true
+  for m in "${MAP_TYPES[@]}"; do
+    local pkg="${MAP_PKGNAME[$m]}"
+    if dpkg -s "$pkg" >/dev/null 2>&1; then
+      dpkg -r "$pkg" || true
+      log "$pkg entfernt"
+    fi
+  done
+  if dpkg -s postfix-custom-dev >/dev/null 2>&1; then
+    dpkg -r postfix-custom-dev || true
+    log "postfix-custom-dev entfernt"
+  fi
   if dpkg -s postfix-custom >/dev/null 2>&1; then
     dpkg -r postfix-custom
     log "postfix-custom entfernt"
@@ -800,6 +1206,8 @@ package_all() {
   prepare_sources
   build_postfix
   create_deb_package
+  create_map_packages
+  create_dev_package
   log "=== Paket-Build abgeschlossen ==="
   echo ""
   local repo_script
