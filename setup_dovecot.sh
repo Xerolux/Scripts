@@ -249,7 +249,8 @@ install_build_deps() {
     libpq-dev \
     libclucene-dev \
     libcurl4-openssl-dev \
-    libexpat1-dev
+    libexpat1-dev \
+    dpkg-sig
 
   if ! command -v fpm >/dev/null 2>&1; then
     log "Installiere fpm"
@@ -551,6 +552,39 @@ generate_checksums() {
     log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
     cat SHA256SUMS | tee -a "$LOG_FILE"
   fi
+}
+
+# ------------------------------------------------------------------------------
+# .deb-Pakete mit dpkg-sig signieren (optional, benoetigt GPG-Schluessel)
+# ------------------------------------------------------------------------------
+sign_packages() {
+  if ! command -v dpkg-sig >/dev/null 2>&1; then
+    log "dpkg-sig nicht installiert – ueberspringe Paketsignierung"
+    return 0
+  fi
+
+  local gpg_key_id="${GPG_KEY_ID:-}"
+  if [ -z "$gpg_key_id" ]; then
+    gpg_key_id="$(gpg --list-secret-keys --with-colons 2>/dev/null | awk -F: '/^sec/{print $5}' | head -1)" || true
+  fi
+
+  if [ -z "$gpg_key_id" ]; then
+    log "Kein GPG-Schluessel gefunden – ueberspringe Paketsignierung"
+    return 0
+  fi
+
+  log "Signiere .deb-Pakete mit GPG-Schluessel $gpg_key_id..."
+  local sign_count=0
+  for deb in "$PACKAGE_DIR"/*.deb; do
+    [ -f "$deb" ] || continue
+    if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
+      continue
+    fi
+    if dpkg-sig -k "$gpg_key_id" --sign builder "$deb" >/dev/null 2>&1; then
+      sign_count=$((sign_count + 1))
+    fi
+  done
+  log "$sign_count Pakete signiert"
 }
 
 # ------------------------------------------------------------------------------
@@ -1808,6 +1842,7 @@ package_all() {
   create_deb_packages
   create_dovecot_dev_package
   create_dovecot_doc_package
+  sign_packages
   log "=== Paket-Build abgeschlossen ==="
 }
 
