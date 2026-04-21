@@ -710,6 +710,12 @@ build_nginx() {
 
   local conf_args
   conf_args="$(build_configure_args)"
+  local -a conf_args_array=()
+  if [ -n "$conf_args" ]; then
+    # build_configure_args liefert eine leerzeichengetrennte Argumentliste.
+    # Wir splitten sie bewusst in ein Array, damit ./configure jedes Flag separat bekommt.
+    read -r -a conf_args_array <<< "$conf_args"
+  fi
 
   log "Configure-Argumente:${conf_args}"
   log "CC_OPT: ${CC_OPT:-}"
@@ -720,7 +726,7 @@ build_nginx() {
   ./configure \
     --with-cc-opt="${CC_OPT:-}" \
     --with-ld-opt="${LD_OPT:-}" \
-    "${conf_args}" 2>&1 | tee -a "$LOG_FILE"
+    "${conf_args_array[@]}" 2>&1 | tee -a "$LOG_FILE"
   local conf_rc=${PIPESTATUS[0]}
   set -e
   [ "$conf_rc" -eq 0 ] || die "./configure fehlgeschlagen (Exit $conf_rc)"
