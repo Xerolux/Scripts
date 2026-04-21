@@ -692,7 +692,7 @@ build_nginx() {
   ./configure \
     --with-cc-opt="${CC_OPT:-}" \
     --with-ld-opt="${LD_OPT:-}" \
-    ${conf_args} 2>&1 | tee -a "$LOG_FILE"
+    "${conf_args}" 2>&1 | tee -a "$LOG_FILE"
   local conf_rc=${PIPESTATUS[0]}
   set -e
   [ "$conf_rc" -eq 0 ] || die "./configure fehlgeschlagen (Exit $conf_rc)"
@@ -818,9 +818,9 @@ generate_checksums() {
   if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
     log "Erstelle SHA256SUMS fuer Pakete..."
     cd "$PACKAGE_DIR"
-    sha256sum *.deb > SHA256SUMS
+    sha256sum ./*.deb > SHA256SUMS
     log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
-    cat SHA256SUMS | tee -a "$LOG_FILE"
+    tee -a "$LOG_FILE" < SHA256SUMS
   fi
 }
 
@@ -1167,7 +1167,7 @@ LUALOAD
       --architecture "$arch" \
       --maintainer   "\"local build <root@localhost>\"" \
       --description  "\"$desc (nginx $NGINX_VERSION)\"" \
-      $fpm_deps \
+      ${fpm_deps} \
       --deb-no-default-config-files \
       --after-install  "/tmp/nginx-mod-postinst.sh" \
       --after-remove   "/tmp/nginx-mod-postrm.sh" \
@@ -1306,7 +1306,7 @@ install_packages() {
     for deb_mod in $deb_modules; do
       log "  Installiere: $(basename "$deb_mod")"
     done
-    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i $deb_modules 2>&1 | tee -a "$LOG_FILE" || true
+    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i "$deb_modules" 2>&1 | tee -a "$LOG_FILE" || true
   else
     log "Keine Modul-Pakete gefunden"
   fi

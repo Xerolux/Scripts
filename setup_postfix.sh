@@ -466,9 +466,9 @@ generate_checksums() {
   if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
     log "Erstelle SHA256SUMS fuer Pakete..."
     cd "$PACKAGE_DIR"
-    sha256sum *.deb > SHA256SUMS
+    sha256sum ./*.deb > SHA256SUMS
     log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
-    cat SHA256SUMS | tee -a "$LOG_FILE"
+    tee -a "$LOG_FILE" < SHA256SUMS
   fi
 }
 
@@ -864,7 +864,7 @@ MAPPOSTRM
     local maptype
     maptype="${soname#postfix-}"
     maptype="${maptype%.so}"
-    echo "${maptype}\t${soname}\t/usr/lib/postfix/${soname}\tdict_${maptype}_open\t${maptype}" \
+    printf "%s\t%s\t/usr/lib/postfix/%s\tdict_%s_open\t%s\n" "${maptype}" "${soname}" "${soname}" "${maptype}" "${maptype}" \
       > "$map_stage/usr/share/postfix/dynamicmaps.d/${soname}.cf"
 
     # Man page (falls vorhanden)
@@ -893,7 +893,7 @@ MAPPOSTRM
       --architecture "$arch" \
       --maintainer   "\"local build <root@localhost>\"" \
       --description  "\"$desc (Postfix $POSTFIX_VERSION)\"" \
-      $fpm_deps \
+      ${fpm_deps} \
       --conflicts    "$conflicts" \
       --provides     "$conflicts" \
       --replaces     "$conflicts" \
@@ -1053,7 +1053,7 @@ install_packages() {
     for deb_map in $deb_maps; do
       log "  $(basename "$deb_map")"
     done
-    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i $deb_maps 2>&1 | tee -a "$LOG_FILE" || true
+    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i "$deb_maps" 2>&1 | tee -a "$LOG_FILE" || true
   fi
 
   # Fehlende Abhängigkeiten nachziehen
