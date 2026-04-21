@@ -287,6 +287,24 @@ require_root() {
   [ "$EUID" -eq 0 ] || die "Bitte als root ausfuehren."
 }
 
+version_ge() {
+  # usage: version_ge "1.30.0" "1.25.0"  => true
+  [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
+module_skip_reason() {
+  local mod="$1"
+
+  # nginx-upstream-fair nutzt alte Nginx-API (u.a. default_port) und baut
+  # gegen aktuelle Nginx-Versionen nicht mehr.
+  if [ "$mod" = "upstream-fair" ] && version_ge "$NGINX_VERSION" "1.25.0"; then
+    echo "inkompatibel mit Nginx >= 1.25 (upstream API aenderte sich)"
+    return 0
+  fi
+
+  return 1
+}
+
 usage() {
   cat <<'EOF'
 Verwendung:
@@ -454,6 +472,12 @@ download_third_party_modules() {
     local giturl="${MOD_GITURL[$mod]}"
     local gitref="${MOD_GITREF[$mod]}"
     local target="$modules_dir/$dirname"
+    local skip_reason=""
+
+    if skip_reason="$(module_skip_reason "$mod")"; then
+      log "  [SKIP] $dirname – $skip_reason"
+      continue
+    fi
 
     [ "$giturl" = "built-in" ] && continue
 
@@ -643,6 +667,12 @@ build_configure_args() {
     local dirname="${MOD_DIRNAME[$mod]}"
     local target="$modules_dir/$dirname"
     local giturl="${MOD_GITURL[$mod]}"
+    local skip_reason=""
+
+    if skip_reason="$(module_skip_reason "$mod")"; then
+      log "  [SKIP] Dynamic: ${MOD_PKGNAME[$mod]} – $skip_reason"
+      continue
+    fi
 
     if [ "$giturl" = "built-in" ]; then
       continue
@@ -1139,6 +1169,12 @@ create_module_packages() {
     local desc="${MOD_DESC[$mod]}"
     local loadconf="${MOD_LOADCONF[$mod]}"
     local extra_deps="${MOD_EXTRADEPS[$mod]}"
+    local skip_reason=""
+
+    if skip_reason="$(module_skip_reason "$mod")"; then
+      log "  [SKIP] $pkg_name – $skip_reason"
+      continue
+    fi
 
     log "Erstelle Paket: $pkg_name"
 
@@ -1522,7 +1558,12 @@ list_modules_cmd() {
   printf "%-25s %-40s %s\n" "PAKETNAME" "MODUL-DIR" "BESCHREIBUNG"
   printf "%-25s %-40s %s\n" "-------------------------" "----------------------------------------" "--------------------"
   for mod in "${THIRD_PARTY_MODULES[@]}"; do
-    printf "%-25s %-40s %s\n" "${MOD_PKGNAME[$mod]}" "${MOD_DIRNAME[$mod]}" "${MOD_DESC[$mod]}"
+    local skip_reason=""
+    if skip_reason="$(module_skip_reason "$mod")"; then
+      printf "%-25s %-40s %s [SKIP: %s]\n" "${MOD_PKGNAME[$mod]}" "${MOD_DIRNAME[$mod]}" "${MOD_DESC[$mod]}" "$skip_reason"
+    else
+      printf "%-25s %-40s %s\n" "${MOD_PKGNAME[$mod]}" "${MOD_DIRNAME[$mod]}" "${MOD_DESC[$mod]}"
+    fi
   done
   echo ""
   echo "Gesamt: ${#THIRD_PARTY_MODULES[@]} Module"
