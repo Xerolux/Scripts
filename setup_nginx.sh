@@ -180,7 +180,7 @@ MOD_NEEDS_SUBMODULE[uploadprogress]="no"
 
 # --- 12. Upstream Fair -------------------------------------------------------
 MOD_DIRNAME[upstream-fair]="nginx-upstream-fair"
-MOD_GITURL[upstream-fair]="https://github.com/gnosek/nginx-upstream-fair-module.git"
+MOD_GITURL[upstream-fair]="https://github.com/gnosek/nginx-upstream-fair.git"
 MOD_GITREF[upstream-fair]="master"
 MOD_PKGNAME[upstream-fair]="libnginx-mod-http-upstream-fair"
 MOD_SOFILES[upstream-fair]="ngx_http_upstream_fair_module.so"
@@ -463,15 +463,35 @@ download_third_party_modules() {
     fi
 
     log "Lade $dirname ($gitref)"
+    local clone_rc=0
     if [ "$gitref" = "master" ]; then
-      git clone --depth 1 "$giturl" "$target"
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$giturl" "$target" || clone_rc=$?
     else
-      git clone --depth 1 --branch "$gitref" "$giturl" "$target"
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$gitref" "$giturl" "$target" || clone_rc=$?
+    fi
+
+    # Legacy fallback fuer upstream-fair (einige alte URLs triggern GitHub Auth-Prompt/404).
+    if [ "$clone_rc" -ne 0 ] && [ "$mod" = "upstream-fair" ]; then
+      rm -rf "$target"
+      local fallback_url="https://github.com/gnosek/nginx-upstream-fair-module.git"
+      log "  [WARN] $dirname Clone fehlgeschlagen ueber primäre URL, versuche Fallback..."
+      clone_rc=0
+      if [ "$gitref" = "master" ]; then
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$fallback_url" "$target" || clone_rc=$?
+      else
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$gitref" "$fallback_url" "$target" || clone_rc=$?
+      fi
+    fi
+
+    if [ "$clone_rc" -ne 0 ]; then
+      log "  [WARN] $dirname konnte nicht geklont werden (ohne Login-Prompt). Modul wird uebersprungen."
+      rm -rf "$target"
+      continue
     fi
 
     if [ "${MOD_NEEDS_SUBMODULE[$mod]}" = "yes" ]; then
       log "Initialisiere Submodules fuer $dirname"
-      (cd "$target" && git submodule update --init)
+      (cd "$target" && GIT_TERMINAL_PROMPT=0 git submodule update --init)
     fi
 
     log "  [OK] $dirname geklont"
