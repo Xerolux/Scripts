@@ -261,7 +261,7 @@ PECL_CONFIGURE[zstd]=""
 
 # --- 19. Lz4 -----------------------------------------------------------------
 PECL_DIRNAME[lz4]="php-lz4"
-PECL_GITURL[lz4]="https://github.com/php/pecl-compression-lz4.git"
+PECL_GITURL[lz4]="https://github.com/kjdev/php-ext-lz4.git"
 PECL_GITREF[lz4]="0.6.0"
 PECL_PKGNAME[lz4]="lz4"
 PECL_DESC[lz4]="LZ4 compression"
@@ -845,11 +845,29 @@ download_pecl_sources() {
     fi
 
     log "Lade $dir ($ref)"
+    local clone_ok=0
     if [ "$ref" = "master" ]; then
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$target"
+      GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --depth 1 "$url" "$target" && clone_ok=1
     else
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$ref" "$url" "$target" || \
-        GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$target"
+      GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --depth 1 --branch "$ref" "$url" "$target" && clone_ok=1
+      if [ "$clone_ok" -eq 0 ]; then
+        local alt_ref=""
+        if [[ "$ref" =~ ^v ]]; then
+          alt_ref="${ref#v}"
+        else
+          alt_ref="v$ref"
+        fi
+        GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --depth 1 --branch "$alt_ref" "$url" "$target" && clone_ok=1
+      fi
+      if [ "$clone_ok" -eq 0 ]; then
+        GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --depth 1 "$url" "$target" && clone_ok=1
+      fi
+    fi
+
+    if [ "$clone_ok" -eq 0 ]; then
+      log "  [WARN] $dir konnte nicht geklont werden – ueberspringe $ext"
+      rm -rf "$target"
+      continue
     fi
     log "  [OK] $dir geklont"
   done
