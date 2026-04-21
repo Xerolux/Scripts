@@ -742,6 +742,7 @@ install_build_deps() {
     libtidy-dev \
     libenchant-2-dev \
     libsodium-dev \
+    libargon2-dev \
     libffi-dev \
     libicu-dev \
     libonig-dev \
