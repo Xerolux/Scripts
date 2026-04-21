@@ -151,9 +151,15 @@ update_local_repo_if_configured() {
   local repo_script repo_env
   repo_script="$(dirname "$0")/setup_local_repo.sh"
   repo_env="$(dirname "$0")/setup_local_repo.env"
+  local repo_env_example
+  repo_env_example="$(dirname "$0")/setup_local_repo.env.example"
 
   if [ ! -x "$repo_script" ]; then
     return 0
+  fi
+  if [ ! -f "$repo_env" ] && [ -f "$repo_env_example" ]; then
+    cp -n "$repo_env_example" "$repo_env" 2>/dev/null || true
+    log "Lokales Repo-Env erstellt: $(basename "$repo_env") (aus .example)"
   fi
   if [ ! -f "$repo_env" ]; then
     log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"

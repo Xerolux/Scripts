@@ -43,6 +43,17 @@ ensure_executable_scripts() {
   done
 }
 
+ensure_env_files() {
+  local ex
+  for ex in "$SCRIPT_DIR"/*.env.example; do
+    [ -f "$ex" ] || continue
+    local target="${ex%.example}"
+    if [ ! -f "$target" ]; then
+      cp -n "$ex" "$target" 2>/dev/null || true
+    fi
+  done
+}
+
 msg_error() {
   whiptail --title "Fehler" --msgbox "$1" 10 70
 }
@@ -502,6 +513,7 @@ main() {
   require_whiptail
   ensure_root "$@"
   ensure_executable_scripts
+  ensure_env_files
   main_menu
   clear
 }

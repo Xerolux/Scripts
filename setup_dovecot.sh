@@ -172,9 +172,15 @@ update_local_repo_if_configured() {
   local repo_script repo_env
   repo_script="$(dirname "$0")/setup_local_repo.sh"
   repo_env="$(dirname "$0")/setup_local_repo.env"
+  local repo_env_example
+  repo_env_example="$(dirname "$0")/setup_local_repo.env.example"
 
   if [ ! -x "$repo_script" ]; then
     return 0
+  fi
+  if [ ! -f "$repo_env" ] && [ -f "$repo_env_example" ]; then
+    cp -n "$repo_env_example" "$repo_env" 2>/dev/null || true
+    log "Lokales Repo-Env erstellt: $(basename "$repo_env") (aus .example)"
   fi
   if [ ! -f "$repo_env" ]; then
     log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"
@@ -183,6 +189,59 @@ update_local_repo_if_configured() {
 
   log "Aktualisiere lokales Repository..."
   "$repo_script" update || true
+}
+
+prepare_pigeonhole_runtime_stage() {
+  [ -d "$STAGE_PIGEONHOLE" ] || return 0
+
+  rm -rf "${STAGE_PIGEONHOLE:?}/etc" "${STAGE_PIGEONHOLE:?}/usr/include" "${STAGE_PIGEONHOLE:?}/usr/local"
+  find "${STAGE_PIGEONHOLE}/usr/lib/dovecot" -type f \( -name "*.a" -o -name "*.la" \) -delete 2>/dev/null || true
+
+  local keep_file_patterns=(
+    "/usr/lib/dovecot/dovecot/managesieve"
+    "/usr/lib/dovecot/dovecot/managesieve-login"
+    "/usr/lib/dovecot/lib90_sieve_plugin.so*"
+    "/usr/lib/dovecot/lib95_imap_filter_sieve_plugin.so*"
+    "/usr/lib/dovecot/lib95_imap_sieve_plugin.so*"
+    "/usr/lib/dovecot/libdovecot-managesieve.so*"
+    "/usr/lib/dovecot/libdovecot-sieve.so*"
+    "/usr/lib/dovecot/doveadm/lib10_doveadm_sieve_plugin.so*"
+    "/usr/lib/dovecot/settings/libmanagesieve_login_settings.so*"
+    "/usr/lib/dovecot/settings/libmanagesieve_settings.so*"
+    "/usr/lib/dovecot/settings/libpigeonhole_settings.so*"
+    "/usr/lib/dovecot/sieve/lib90_sieve_extprograms_plugin.so*"
+    "/usr/lib/dovecot/sieve/lib90_sieve_imapsieve_plugin.so*"
+    "/usr/share/doc/dovecot/example-config/conf.d/20-managesieve.conf"
+    "/usr/share/doc/dovecot/example-config/conf.d/90-sieve.conf"
+    "/usr/share/doc/dovecot/example-config/conf.d/90-sieve-extprograms.conf"
+    "/usr/share/doc/dovecot/example-config/sieve-ldap.conf"
+    "/usr/share/doc/dovecot/sieve/*"
+  )
+
+  local file_count=0
+  local removed_count=0
+  while IFS= read -r staged_file; do
+    [ -n "$staged_file" ] || continue
+    file_count=$((file_count + 1))
+    local rel="${staged_file#"$STAGE_PIGEONHOLE"}"
+    local keep=0
+    local p
+    for p in "${keep_file_patterns[@]}"; do
+      case "$rel" in
+        $p)
+          keep=1
+          break
+          ;;
+      esac
+    done
+    if [ "$keep" -eq 0 ]; then
+      rm -f "$staged_file"
+      removed_count=$((removed_count + 1))
+    fi
+  done < <(find "$STAGE_PIGEONHOLE" -type f 2>/dev/null || true)
+
+  find "$STAGE_PIGEONHOLE" -depth -type d -empty -delete 2>/dev/null || true
+  log "Pigeonhole Runtime-Whitelist: $removed_count/$file_count Dateien entfernt"
 }
 
 # ------------------------------------------------------------------------------
@@ -879,25 +938,7 @@ EOF
   # STAGE_PIGEONHOLE wurde in build_pigeonhole() via make install DESTDIR befüllt
   [ -d "$STAGE_PIGEONHOLE" ] || die "Pigeonhole-Staging fehlt – zuerst 'package' ausführen"
 
-  # /etc aus Staging entfernen
-  rm -rf "${STAGE_PIGEONHOLE:?}/etc"
-
-  # Runtime-only Paket: Dev-Artefakte und /usr/local Inhalte entfernen.
-  local prune_count=0
-  if [ -d "${STAGE_PIGEONHOLE}/usr/include" ]; then
-    rm -rf "${STAGE_PIGEONHOLE}/usr/include"
-    prune_count=$((prune_count + 1))
-  fi
-  if [ -d "${STAGE_PIGEONHOLE}/usr/local" ]; then
-    rm -rf "${STAGE_PIGEONHOLE}/usr/local"
-    prune_count=$((prune_count + 1))
-  fi
-  while IFS= read -r devfile; do
-    [ -n "$devfile" ] || continue
-    rm -f "$devfile"
-    prune_count=$((prune_count + 1))
-  done < <(find "${STAGE_PIGEONHOLE}/usr/lib/dovecot" -type f \( -name "*.a" -o -name "*.la" \) 2>/dev/null || true)
-  log "Pigeonhole Runtime-Cleanup: $prune_count Dev-Artefakte entfernt"
+  prepare_pigeonhole_runtime_stage
 
   log "Pigeonhole Staging-Inhalt:"
   find "$STAGE_PIGEONHOLE" \( -name "*.so" -o -name "*sieve*" -o -name "*managesieve*" \) \
@@ -1827,24 +1868,7 @@ package_pigeonhole() {
 
   log "Prüfe Pigeonhole-Staging"
   [ -d "$STAGE_PIGEONHOLE" ] || die "Pigeonhole-Staging fehlt nach build_pigeonhole"
-  rm -rf "${STAGE_PIGEONHOLE:?}/etc"
-
-  # Runtime-only Paket: Dev-Artefakte und /usr/local Inhalte entfernen.
-  local prune_count=0
-  if [ -d "${STAGE_PIGEONHOLE}/usr/include" ]; then
-    rm -rf "${STAGE_PIGEONHOLE}/usr/include"
-    prune_count=$((prune_count + 1))
-  fi
-  if [ -d "${STAGE_PIGEONHOLE}/usr/local" ]; then
-    rm -rf "${STAGE_PIGEONHOLE}/usr/local"
-    prune_count=$((prune_count + 1))
-  fi
-  while IFS= read -r devfile; do
-    [ -n "$devfile" ] || continue
-    rm -f "$devfile"
-    prune_count=$((prune_count + 1))
-  done < <(find "${STAGE_PIGEONHOLE}/usr/lib/dovecot" -type f \( -name "*.a" -o -name "*.la" \) 2>/dev/null || true)
-  log "Pigeonhole Runtime-Cleanup: $prune_count Dev-Artefakte entfernt"
+  prepare_pigeonhole_runtime_stage
 
   log "Pigeonhole Staging-Inhalt:"
   find "$STAGE_PIGEONHOLE" \( -name "*.so" -o -name "*sieve*" -o -name "*managesieve*" \)     | sort | tee -a "$LOG_FILE"

@@ -16,6 +16,10 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [[ ! -f "$SCRIPT_DIR/setup_local_repo.env" ]] && [[ -f "$SCRIPT_DIR/setup_local_repo.env.example" ]]; then
+  cp -n "$SCRIPT_DIR/setup_local_repo.env.example" "$SCRIPT_DIR/setup_local_repo.env" 2>/dev/null || true
+  echo "HINWEIS: setup_local_repo.env wurde aus setup_local_repo.env.example erstellt." >&2
+fi
 if [[ ! -f "$SCRIPT_DIR/setup_local_repo.env" ]]; then
   echo "FEHLER: setup_local_repo.env nicht gefunden. Bitte in $SCRIPT_DIR aus setup_local_repo.env.example erstellen." >&2
   exit 1
