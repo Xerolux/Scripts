@@ -952,6 +952,7 @@ create_sub_packages() {
 
   local mod_dir="${STAGE_DOVECOT}/usr/lib/dovecot/modules"
   local lib_dir="${STAGE_DOVECOT}/usr/lib/dovecot"
+  local search_dir="$lib_dir"
 
   local mod_postinst="/tmp/dovecot-sub-postinst.sh"
   local mod_postrm="/tmp/dovecot-sub-postrm.sh"
@@ -999,11 +1000,11 @@ SUBPOSTRM
       fi
 
       for subdir in "auth" "dict" ""; do
-        local so_path="${mod_dir}/${subdir}/libdriver_${driver_name}.so"
+        local so_path="${search_dir}/${subdir}/libdriver_${driver_name}.so"
         if [ -f "$so_path" ]; then
-          mkdir -p "$sub_stage/usr/lib/dovecot/modules/${subdir}"
-          cp "$so_path" "$sub_stage/usr/lib/dovecot/modules/${subdir}/"
-          log "  [OK] modules/${subdir}/libdriver_${driver_name}.so"
+          mkdir -p "$sub_stage/usr/lib/dovecot/${subdir}"
+          cp "$so_path" "$sub_stage/usr/lib/dovecot/${subdir}/"
+          log "  [OK] ${subdir}/libdriver_${driver_name}.so"
           found_any=1
         fi
       done
@@ -1011,28 +1012,28 @@ SUBPOSTRM
 
     # LDAP: libauthdb_ldap.so, libdict_ldap.so, libdovecot-ldap.so
     if [ "$sp" = "ldap" ]; then
-      find "$mod_dir" -name "libauthdb_ldap.so" -o -name "libdict_ldap.so" 2>/dev/null | while IFS= read -r f; do
+      while IFS= read -r f; do
         [ -z "$f" ] && continue
         local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
         found_any=1
-      done
-      find "$lib_dir" -maxdepth 1 -name "libdovecot-ldap.so*" 2>/dev/null | while IFS= read -r f; do
+      done < <(find "$search_dir" \( -name "libauthdb_ldap.so" -o -name "libdict_ldap.so" \) -type f 2>/dev/null || true)
+      while IFS= read -r f; do
         [ -z "$f" ] && continue
         local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
         found_any=1
-      done
+      done < <(find "$lib_dir" -maxdepth 1 -name "libdovecot-ldap.so*" -type f 2>/dev/null || true)
     fi
 
     # GSSAPI: libmech_gssapi.so
     if [ "$sp" = "gssapi" ]; then
       local gss_so
-      gss_so="$(find "$mod_dir" -name "libmech_gssapi.so" 2>/dev/null | head -1)"
+      gss_so="$(find "$search_dir" -name "libmech_gssapi.so" -type f 2>/dev/null | head -1)"
       if [ -n "$gss_so" ]; then
         local rel="${gss_so#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
@@ -1045,7 +1046,7 @@ SUBPOSTRM
     # Solr: lib21_fts_solr_plugin.so
     if [ "$sp" = "solr" ]; then
       local solr_so
-      solr_so="$(find "$mod_dir" -name "lib21_fts_solr_plugin.so" 2>/dev/null | head -1)"
+      solr_so="$(find "$search_dir" -name "lib21_fts_solr_plugin.so" -type f 2>/dev/null | head -1)"
       if [ -n "$solr_so" ]; then
         local rel="${solr_so#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
@@ -1066,14 +1067,14 @@ SUBPOSTRM
           found_any=1
         fi
       done
-      find "$mod_dir" -name "lib02_imap_acl_plugin.so" -o -name "lib11_imap_quota_plugin.so" -o -name "lib30_imap_zlib_plugin.so" 2>/dev/null | while IFS= read -r f; do
+      while IFS= read -r f; do
         [ -z "$f" ] && continue
         local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
         found_any=1
-      done
+      done < <(find "$search_dir" \( -name "lib02_imap_acl_plugin.so" -o -name "lib11_imap_quota_plugin.so" -o -name "lib30_imap_zlib_plugin.so" \) -type f 2>/dev/null || true)
     elif [ "$sp" = "pop3d" ]; then
       for b in pop3 pop3-login; do
         local bin="${lib_dir}/$b"
@@ -1084,14 +1085,14 @@ SUBPOSTRM
           found_any=1
         fi
       done
-      find "$mod_dir" -name "libpop3*" 2>/dev/null | while IFS= read -r f; do
+      while IFS= read -r f; do
         [ -z "$f" ] && continue
         local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
         found_any=1
-      done
+      done < <(find "$search_dir" -name "libpop3*" -type f 2>/dev/null || true)
     elif [ "$sp" = "lmtpd" ]; then
       local lmtp_bin="${lib_dir}/lmtp"
       if [ -f "$lmtp_bin" ]; then
@@ -1100,14 +1101,14 @@ SUBPOSTRM
         log "  [OK] lmtp"
         found_any=1
       fi
-      find "$mod_dir" -name "liblmtp*" 2>/dev/null | while IFS= read -r f; do
+      while IFS= read -r f; do
         [ -z "$f" ] && continue
         local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
         found_any=1
-      done
+      done < <(find "$search_dir" -name "liblmtp*" -type f 2>/dev/null || true)
     fi
 
     if [ "$found_any" -eq 0 ]; then
