@@ -548,9 +548,9 @@ generate_checksums() {
   if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
     log "Erstelle SHA256SUMS fuer Pakete..."
     cd "$PACKAGE_DIR"
-    sha256sum *.deb > SHA256SUMS
+    sha256sum ./*.deb > SHA256SUMS
     log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
-    cat SHA256SUMS | tee -a "$LOG_FILE"
+    tee -a "$LOG_FILE" < SHA256SUMS
   fi
 }
 
@@ -986,15 +986,17 @@ SUBPOSTRM
 
     # LDAP: libauthdb_ldap.so, libdict_ldap.so, libdovecot-ldap.so
     if [ "$sp" = "ldap" ]; then
-      for f in $(find "$mod_dir" -name "libauthdb_ldap.so" -o -name "libdict_ldap.so" 2>/dev/null); do
-        local rel="${f#$STAGE_DOVECOT}"
+      find "$mod_dir" -name "libauthdb_ldap.so" -o -name "libdict_ldap.so" 2>/dev/null | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
         found_any=1
       done
-      for f in $(find "$lib_dir" -maxdepth 1 -name "libdovecot-ldap.so*" 2>/dev/null); do
-        local rel="${f#$STAGE_DOVECOT}"
+      find "$lib_dir" -maxdepth 1 -name "libdovecot-ldap.so*" 2>/dev/null | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1007,7 +1009,7 @@ SUBPOSTRM
       local gss_so
       gss_so="$(find "$mod_dir" -name "libmech_gssapi.so" 2>/dev/null | head -1)"
       if [ -n "$gss_so" ]; then
-        local rel="${gss_so#$STAGE_DOVECOT}"
+        local rel="${gss_so#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$gss_so" "$sub_stage$rel"
         log "  [OK] libmech_gssapi.so"
@@ -1020,7 +1022,7 @@ SUBPOSTRM
       local solr_so
       solr_so="$(find "$mod_dir" -name "lib21_fts_solr_plugin.so" 2>/dev/null | head -1)"
       if [ -n "$solr_so" ]; then
-        local rel="${solr_so#$STAGE_DOVECOT}"
+        local rel="${solr_so#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$solr_so" "$sub_stage$rel"
         log "  [OK] lib21_fts_solr_plugin.so"
@@ -1039,8 +1041,9 @@ SUBPOSTRM
           found_any=1
         fi
       done
-      for f in $(find "$mod_dir" -name "lib02_imap_acl_plugin.so" -o -name "lib11_imap_quota_plugin.so" -o -name "lib30_imap_zlib_plugin.so" 2>/dev/null); do
-        local rel="${f#$STAGE_DOVECOT}"
+      find "$mod_dir" -name "lib02_imap_acl_plugin.so" -o -name "lib11_imap_quota_plugin.so" -o -name "lib30_imap_zlib_plugin.so" 2>/dev/null | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1056,8 +1059,9 @@ SUBPOSTRM
           found_any=1
         fi
       done
-      for f in $(find "$mod_dir" -name "libpop3*" 2>/dev/null); do
-        local rel="${f#$STAGE_DOVECOT}"
+      find "$mod_dir" -name "libpop3*" 2>/dev/null | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1071,8 +1075,9 @@ SUBPOSTRM
         log "  [OK] lmtp"
         found_any=1
       fi
-      for f in $(find "$mod_dir" -name "liblmtp*" 2>/dev/null); do
-        local rel="${f#$STAGE_DOVECOT}"
+      find "$mod_dir" -name "liblmtp*" 2>/dev/null | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel="${f#"$STAGE_DOVECOT"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1108,7 +1113,7 @@ SUBPOSTRM
       --architecture "$arch" \
       --maintainer   "\"local build <root@localhost>\"" \
       --description  "\"$desc (Dovecot $DOVECOT_VERSION)\"" \
-      $fpm_deps \
+      ${fpm_deps} \
       --conflicts    "$conflicts" \
       --provides     "$conflicts" \
       --replaces     "$conflicts" \
@@ -1190,7 +1195,7 @@ install_packages() {
     for deb_sub in $deb_subs; do
       log "  $(basename "$deb_sub")"
     done
-    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i $deb_subs 2>&1 | tee -a "$LOG_FILE" || true
+    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i "$deb_subs" 2>&1 | tee -a "$LOG_FILE" || true
   fi
 
   # Abhängigkeiten nachziehen falls nötig

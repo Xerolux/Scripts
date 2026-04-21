@@ -135,14 +135,14 @@ backup_system() {
   [ -f /etc/hostname ]          && cp -a /etc/hostname          "$dest/system/hostname"
   [ -f /etc/mailname ]          && cp -a /etc/mailname          "$dest/system/mailname"
 
-  [ -d /etc/ssl ] && cp -a /etc/ssl "$dest/system/etc_ssl" 2>/dev/null || true
+  if [ -d /etc/ssl ]; then cp -a /etc/ssl "$dest/system/etc_ssl" 2>/dev/null || true; fi
 
   if [ -d /etc/letsencrypt ]; then
     log "  Sichere Let's Encrypt..."
     cp -a /etc/letsencrypt "$dest/system/letsencrypt" 2>/dev/null || true
   fi
 
-  [ -d /etc/logrotate.d ] && cp -a /etc/logrotate.d "$dest/system/logrotate.d" 2>/dev/null || true
+  if [ -d /etc/logrotate.d ]; then cp -a /etc/logrotate.d "$dest/system/logrotate.d" 2>/dev/null || true; fi
 
   crontab -l > "$dest/system/crontab-root.txt" 2>/dev/null || true
 
@@ -150,7 +150,7 @@ backup_system() {
     log "  Sichere ISPConfig..."
     mkdir -p "$dest/system/ispconfig"
     cp -a /usr/local/ispconfig "$dest/system/ispconfig/" 2>/dev/null || true
-    [ -f /etc/ispconfig_db_encrypt.key ] && cp -a /etc/ispconfig_db_encrypt.key "$dest/system/ispconfig/" 2>/dev/null || true
+    if [ -f /etc/ispconfig_db_encrypt.key ]; then cp -a /etc/ispconfig_db_encrypt.key "$dest/system/ispconfig/" 2>/dev/null || true; fi
   fi
 }
 
@@ -245,8 +245,8 @@ restore_postfix() {
   [ -f "$src/postfix/postfix.service" ] && cp -a "$src/postfix/postfix.service" /lib/systemd/system/postfix.service
   [ -f "$src/postfix/etc_aliases" ]     && cp -a "$src/postfix/etc_aliases"     /etc/aliases
 
-  command -v newaliases >/dev/null 2>&1 && newaliases 2>/dev/null || true
-  command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+  if command -v newaliases >/dev/null 2>&1; then newaliases 2>/dev/null || true; fi
+  if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload || true; fi
   log "  Postfix wiederhergestellt"
 }
 
@@ -261,7 +261,7 @@ restore_dovecot() {
   [ -f "$src/dovecot/dovecot.socket" ]        && cp -a "$src/dovecot/dovecot.socket"        /lib/systemd/system/dovecot.socket
   [ -f "$src/dovecot/etc_default_dovecot" ]   && cp -a "$src/dovecot/etc_default_dovecot"   /etc/default/dovecot
 
-  command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+  if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload || true; fi
   log "  Dovecot wiederhergestellt"
 }
 
@@ -274,8 +274,8 @@ restore_nginx() {
   [ -d "$src/nginx/usr_lib_nginx" ]     && cp -a "$src/nginx/usr_lib_nginx"     /usr/lib/nginx
   [ -f "$src/nginx/nginx.service" ]     && cp -a "$src/nginx/nginx.service"     /lib/systemd/system/nginx.service
 
-  command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-  command -v nginx >/dev/null 2>&1 && nginx -t 2>/dev/null || log "  WARNUNG: nginx -t fehlgeschlagen"
+  if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload || true; fi
+  if command -v nginx >/dev/null 2>&1; then nginx -t 2>/dev/null || log "  WARNUNG: nginx -t fehlgeschlagen"; fi
   log "  Nginx wiederhergestellt"
 }
 
@@ -306,8 +306,8 @@ restore_system() {
   fi
 
   if [ -d "$src/system/ispconfig" ]; then
-    [ -d "$src/system/ispconfig/ispconfig" ] && cp -a "$src/system/ispconfig/ispconfig" /usr/local/ 2>/dev/null || true
-    [ -f "$src/system/ispconfig/ispconfig_db_encrypt.key" ] && cp -a "$src/system/ispconfig/ispconfig_db_encrypt.key" /etc/ 2>/dev/null || true
+    if [ -d "$src/system/ispconfig/ispconfig" ]; then cp -a "$src/system/ispconfig/ispconfig" /usr/local/ 2>/dev/null || true; fi
+    if [ -f "$src/system/ispconfig/ispconfig_db_encrypt.key" ]; then cp -a "$src/system/ispconfig/ispconfig_db_encrypt.key" /etc/ 2>/dev/null || true; fi
   fi
 
   if [ -f "$src/system/apt-hold.txt" ] && [ -s "$src/system/apt-hold.txt" ]; then

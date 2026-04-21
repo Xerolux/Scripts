@@ -191,7 +191,7 @@ Description: Lokales Repository fuer Custom-Build-Pakete
 RELEASEHEAD
 
   echo "MD5Sum:" >> Release
-  for f in Packages.gz $(ls *.deb 2>/dev/null || true); do
+  for f in Packages.gz $(ls ./*.deb 2>/dev/null || true); do
     [ -f "$f" ] || continue
     local md5 size
     md5="$(md5sum "$f" | awk '{print $1}')"
@@ -200,7 +200,7 @@ RELEASEHEAD
   done
 
   echo "SHA1:" >> Release
-  for f in Packages.gz $(ls *.deb 2>/dev/null || true); do
+  for f in Packages.gz $(ls ./*.deb 2>/dev/null || true); do
     [ -f "$f" ] || continue
     local sha1 size
     sha1="$(sha1sum "$f" | awk '{print $1}')"
@@ -209,7 +209,7 @@ RELEASEHEAD
   done
 
   echo "SHA256:" >> Release
-  for f in Packages.gz $(ls *.deb 2>/dev/null || true); do
+  for f in Packages.gz $(ls ./*.deb 2>/dev/null || true); do
     [ -f "$f" ] || continue
     local sha256 size
     sha256="$(sha256sum "$f" | awk '{print $1}')"
@@ -246,7 +246,7 @@ generate_checksums() {
   if [ -d "$REPO_DIR" ] && ls "$REPO_DIR"/*.deb >/dev/null 2>&1; then
     log "Erstelle SHA256SUMS..."
     cd "$REPO_DIR"
-    sha256sum *.deb > SHA256SUMS
+    sha256sum ./*.deb > SHA256SUMS
     log "SHA256SUMS erstellt ($(wc -l < SHA256SUMS) Pakete)"
   fi
 }

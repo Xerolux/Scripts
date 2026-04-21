@@ -938,7 +938,7 @@ build_php() {
   set +e
   ./configure \
     --with-cc-opt="$CC_OPT" \
-    $CONF_ARGS \
+    "$CONF_ARGS" \
     2>&1 | tee -a "$LOG_FILE"
   local conf_rc=${PIPESTATUS[0]}
   set -e
@@ -1036,7 +1036,7 @@ build_pecl_extensions() {
 
       set +e
       if [ -n "$conf" ]; then
-        ./configure --with-php-config="$php_config" $conf 2>&1 | tee -a "$LOG_FILE"
+        ./configure --with-php-config="$php_config" "$conf" 2>&1 | tee -a "$LOG_FILE"
       else
         ./configure --with-php-config="$php_config" 2>&1 | tee -a "$LOG_FILE"
       fi
@@ -1163,9 +1163,9 @@ generate_checksums() {
   if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
     log "Erstelle SHA256SUMS fuer Pakete..."
     cd "$PACKAGE_DIR"
-    sha256sum *.deb > SHA256SUMS
+    sha256sum ./*.deb > SHA256SUMS
     log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
-    cat SHA256SUMS | tee -a "$LOG_FILE"
+    tee -a "$LOG_FILE" < SHA256SUMS
   fi
 }
 
@@ -1275,7 +1275,7 @@ DISMOD
   # Ensure man pages are included
   mkdir -p "${STAGE_PHP}/usr/share/man/man1"
   for manfile in "${STAGE_PHP}/usr/share/man/man1"/*.1; do
-    [ -f "$manfile" ] && gzip -f "$manfile" 2>/dev/null || true
+    if [ -f "$manfile" ]; then gzip -f "$manfile" 2>/dev/null || true; fi
   done
 
   # If no man pages were installed, copy from source
@@ -1526,7 +1526,7 @@ create_extension_packages() {
   local php_config="$STAGE_PHP$PHP_PREFIX/bin/php-config"
   local ext_install_dir
   ext_install_dir="$($php_config --extension-dir 2>/dev/null || echo "$PHP_EXTENSION_DIR")"
-  ext_install_dir="${ext_install_dir#$STAGE_PHP}"
+  ext_install_dir="${ext_install_dir#"$STAGE_PHP"}"
 
   create_ext_maintainer_scripts
 
@@ -1586,8 +1586,8 @@ create_extension_packages() {
       --architecture "$arch" \
       --maintainer   "\"local build <root@localhost>\"" \
       --description  "\"$desc (PHP $PHP_VERSION)\"" \
-      $fpm_deps \
-      $fpm_conflicts \
+      ${fpm_deps} \
+      ${fpm_conflicts} \
       --deb-no-default-config-files \
       --after-install  "/tmp/php-ext-postinst.sh" \
       --after-remove   "/tmp/php-ext-postrm.sh" \
@@ -1721,7 +1721,7 @@ install_packages() {
     for deb_ext in $deb_exts; do
       log "  $(basename "$deb_ext")"
     done
-    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i $deb_exts 2>&1 | tee -a "$LOG_FILE" || true
+    DEBIAN_FRONTEND=noninteractive dpkg --force-confold --force-confdef -i "$deb_exts" 2>&1 | tee -a "$LOG_FILE" || true
   fi
 
   apt-get install -f -y || true
@@ -1748,7 +1748,7 @@ post_checks() {
 
   if [ -f "/usr/sbin/php-fpm${PHP_VER_SHORT}" ]; then
     log "FPM Konfigurationscheck"
-    "/usr/sbin/php-fpm${PHP_VER_SHORT}" -t 2>&1 >> "$LOG_FILE" \
+    { "/usr/sbin/php-fpm${PHP_VER_SHORT}" -t >> "$LOG_FILE"; } 2>&1 \
       || log "WARNUNG: FPM Konfigurationsfehler – Log: $LOG_FILE"
 
     if ! systemctl is-active --quiet "php${PHP_VER_SHORT}-fpm"; then
@@ -1871,9 +1871,9 @@ list_extensions_cmd() {
 
 check_config() {
   log "PHP Module-Check"
-  [ -f "/usr/bin/php${PHP_VER_SHORT}" ] && "/usr/bin/php${PHP_VER_SHORT}" -m || true
+  if [ -f "/usr/bin/php${PHP_VER_SHORT}" ]; then "/usr/bin/php${PHP_VER_SHORT}" -m || true; fi
   log "FPM Konfigurationscheck"
-  [ -f "/usr/sbin/php-fpm${PHP_VER_SHORT}" ] && "/usr/sbin/php-fpm${PHP_VER_SHORT}" -t || true
+  if [ -f "/usr/sbin/php-fpm${PHP_VER_SHORT}" ]; then "/usr/sbin/php-fpm${PHP_VER_SHORT}" -t || true; fi
 }
 
 uninstall_cmd() {
