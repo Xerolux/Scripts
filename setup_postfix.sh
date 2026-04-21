@@ -153,6 +153,7 @@ update_local_repo_if_configured() {
   repo_env="$(dirname "$0")/setup_local_repo.env"
   local repo_env_example
   repo_env_example="$(dirname "$0")/setup_local_repo.env.example"
+  local repo_dir=""
 
   if [ ! -x "$repo_script" ]; then
     return 0
@@ -163,6 +164,23 @@ update_local_repo_if_configured() {
   fi
   if [ ! -f "$repo_env" ]; then
     log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"
+    return 0
+  fi
+
+  repo_dir="$(
+    (
+      set +u
+      # shellcheck disable=SC1090
+      source "$repo_env" 2>/dev/null || true
+      printf '%s' "${REPO_DIR:-}"
+    )
+  )"
+  if [ -z "$repo_dir" ]; then
+    log "Lokales Repository-Update uebersprungen: REPO_DIR ist nicht gesetzt"
+    return 0
+  fi
+  if [ ! -d "$repo_dir" ]; then
+    log "Lokales Repository-Update uebersprungen: REPO_DIR existiert nicht ($repo_dir)"
     return 0
   fi
 

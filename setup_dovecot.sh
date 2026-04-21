@@ -35,6 +35,7 @@ SSLDIR="/etc/ssl"
 # Staging-Verzeichnisse (DESTDIR für make install)
 STAGE_DOVECOT="/tmp/dovecot-stage"
 STAGE_PIGEONHOLE="/tmp/pigeonhole-stage"
+SUB_SOURCE_STAGE=""
 
 # ------------------------------------------------------------------------------
 # Dovecot Sub-Package-Definitionen
@@ -174,6 +175,7 @@ update_local_repo_if_configured() {
   repo_env="$(dirname "$0")/setup_local_repo.env"
   local repo_env_example
   repo_env_example="$(dirname "$0")/setup_local_repo.env.example"
+  local repo_dir=""
 
   if [ ! -x "$repo_script" ]; then
     return 0
@@ -184,6 +186,23 @@ update_local_repo_if_configured() {
   fi
   if [ ! -f "$repo_env" ]; then
     log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"
+    return 0
+  fi
+
+  repo_dir="$(
+    (
+      set +u
+      # shellcheck disable=SC1090
+      source "$repo_env" 2>/dev/null || true
+      printf '%s' "${REPO_DIR:-}"
+    )
+  )"
+  if [ -z "$repo_dir" ]; then
+    log "Lokales Repository-Update uebersprungen: REPO_DIR ist nicht gesetzt"
+    return 0
+  fi
+  if [ ! -d "$repo_dir" ]; then
+    log "Lokales Repository-Update uebersprungen: REPO_DIR existiert nicht ($repo_dir)"
     return 0
   fi
 
@@ -831,6 +850,12 @@ EOF
     log "Systemd-Hardening angewendet"
   fi
 
+  # Sub-Pakete aus einer ungestrippten Quelle bauen.
+  local sub_source_stage="/tmp/dovecot-sub-source-stage"
+  rm -rf "$sub_source_stage"
+  cp -a "$STAGE_DOVECOT" "$sub_source_stage"
+  SUB_SOURCE_STAGE="$sub_source_stage"
+
   # Übersicht was tatsächlich drin ist
   log "Staging-Inhalt (relevante Dateien):"
   find "$STAGE_DOVECOT" \( -name "dovecot" -o -name "doveadm" -o -name "dovecot-config" \
@@ -999,7 +1024,8 @@ EOF
   echo "HINWEIS: /etc/dovecot ist NICHT in den Paketen."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
   echo ""
-  update_local_repo_if_configured
+  rm -rf "$sub_source_stage"
+  SUB_SOURCE_STAGE=""
 
   echo "Nächster Schritt:          $0 install"
   echo "Später deinstallieren:     $0 uninstall"
@@ -1020,8 +1046,9 @@ create_sub_packages() {
   local arch
   arch="$(dpkg --print-architecture)"
 
-  local mod_dir="${STAGE_DOVECOT}/usr/lib/dovecot/modules"
-  local lib_dir="${STAGE_DOVECOT}/usr/lib/dovecot"
+  local source_stage="${SUB_SOURCE_STAGE:-$STAGE_DOVECOT}"
+  local mod_dir="${source_stage}/usr/lib/dovecot/modules"
+  local lib_dir="${source_stage}/usr/lib/dovecot"
   local search_dir="$lib_dir"
 
   local mod_postinst="/tmp/dovecot-sub-postinst.sh"
@@ -1084,7 +1111,7 @@ SUBPOSTRM
     if [ "$sp" = "ldap" ]; then
       while IFS= read -r f; do
         [ -z "$f" ] && continue
-        local rel="${f#"$STAGE_DOVECOT"}"
+        local rel="${f#"$source_stage"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1092,7 +1119,7 @@ SUBPOSTRM
       done < <(find "$search_dir" \( -name "libauthdb_ldap.so" -o -name "libdict_ldap.so" \) -type f 2>/dev/null || true)
       while IFS= read -r f; do
         [ -z "$f" ] && continue
-        local rel="${f#"$STAGE_DOVECOT"}"
+        local rel="${f#"$source_stage"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1105,7 +1132,7 @@ SUBPOSTRM
       local gss_so
       gss_so="$(find "$search_dir" -name "libmech_gssapi.so" -type f 2>/dev/null | head -1)"
       if [ -n "$gss_so" ]; then
-        local rel="${gss_so#"$STAGE_DOVECOT"}"
+        local rel="${gss_so#"$source_stage"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$gss_so" "$sub_stage$rel"
         log "  [OK] libmech_gssapi.so"
@@ -1118,7 +1145,7 @@ SUBPOSTRM
       local solr_so
       solr_so="$(find "$search_dir" -name "lib21_fts_solr_plugin.so" -type f 2>/dev/null | head -1)"
       if [ -n "$solr_so" ]; then
-        local rel="${solr_so#"$STAGE_DOVECOT"}"
+        local rel="${solr_so#"$source_stage"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$solr_so" "$sub_stage$rel"
         log "  [OK] lib21_fts_solr_plugin.so"
@@ -1139,7 +1166,7 @@ SUBPOSTRM
       done
       while IFS= read -r f; do
         [ -z "$f" ] && continue
-        local rel="${f#"$STAGE_DOVECOT"}"
+        local rel="${f#"$source_stage"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1157,7 +1184,7 @@ SUBPOSTRM
       done
       while IFS= read -r f; do
         [ -z "$f" ] && continue
-        local rel="${f#"$STAGE_DOVECOT"}"
+        local rel="${f#"$source_stage"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1173,7 +1200,7 @@ SUBPOSTRM
       fi
       while IFS= read -r f; do
         [ -z "$f" ] && continue
-        local rel="${f#"$STAGE_DOVECOT"}"
+        local rel="${f#"$source_stage"}"
         mkdir -p "$sub_stage$(dirname "$rel")"
         cp "$f" "$sub_stage$rel"
         log "  [OK] $(basename "$f")"
@@ -1939,6 +1966,7 @@ package_all() {
   create_dovecot_dev_package
   create_dovecot_doc_package
   sign_packages
+  update_local_repo_if_configured
   log "=== Paket-Build abgeschlossen ==="
 }
 
