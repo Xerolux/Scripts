@@ -826,12 +826,18 @@ download_pecl_sources() {
   mkdir -p "$pecl_dir"
 
   for ext in "${PECL_EXTENSIONS[@]}"; do
-    local url="${PECL_GITURL[$ext]}"
-    local ref="${PECL_GITREF[$ext]}"
-    local dir="${PECL_DIRNAME[$ext]}"
+    local url="${PECL_GITURL[$ext]:-}"
+    local ref="${PECL_GITREF[$ext]:-master}"
+    local dir="${PECL_DIRNAME[$ext]:-$ext}"
     local target="$pecl_dir/$dir"
 
-    [ "$url" = "built-in" ] && continue
+    if [ "$url" = "built-in" ]; then
+      continue
+    fi
+    if [ -z "$url" ]; then
+      log "  [WARN] $ext: keine PECL_GITURL gesetzt – ueberspringe"
+      continue
+    fi
 
     if [ -d "$target" ]; then
       log "  [OK] $dir bereits vorhanden"
@@ -840,10 +846,10 @@ download_pecl_sources() {
 
     log "Lade $dir ($ref)"
     if [ "$ref" = "master" ]; then
-      git clone --depth 1 "$url" "$target"
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$target"
     else
-      git clone --depth 1 --branch "$ref" "$url" "$target" || \
-        git clone --depth 1 "$url" "$target"
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$ref" "$url" "$target" || \
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$target"
     fi
     log "  [OK] $dir geklont"
   done
