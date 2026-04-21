@@ -305,6 +305,47 @@ module_skip_reason() {
   return 1
 }
 
+update_local_repo_if_configured() {
+  local repo_script repo_env
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
+  repo_env="$(dirname "$0")/setup_local_repo.env"
+  local repo_env_example
+  repo_env_example="$(dirname "$0")/setup_local_repo.env.example"
+  local repo_dir=""
+
+  if [ ! -x "$repo_script" ]; then
+    return 0
+  fi
+  if [ ! -f "$repo_env" ] && [ -f "$repo_env_example" ]; then
+    cp -n "$repo_env_example" "$repo_env" 2>/dev/null || true
+    log "Lokales Repo-Env erstellt: $(basename "$repo_env") (aus .example)"
+  fi
+  if [ ! -f "$repo_env" ]; then
+    log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"
+    return 0
+  fi
+
+  repo_dir="$(
+    (
+      set +u
+      # shellcheck disable=SC1090
+      source "$repo_env" 2>/dev/null || true
+      printf '%s' "${REPO_DIR:-}"
+    )
+  )"
+  if [ -z "$repo_dir" ]; then
+    log "Lokales Repository-Update uebersprungen: REPO_DIR ist nicht gesetzt"
+    return 0
+  fi
+  if [ ! -d "$repo_dir" ]; then
+    log "Lokales Repository-Update uebersprungen: REPO_DIR existiert nicht ($repo_dir)"
+    return 0
+  fi
+
+  log "Aktualisiere lokales Repository..."
+  "$repo_script" update || true
+}
+
 usage() {
   cat <<'EOF'
 Verwendung:
@@ -1301,12 +1342,6 @@ create_all_packages() {
   echo "Module aktivieren (Beispiel fuer /etc/nginx/nginx.conf):"
   echo "  include /usr/share/nginx/modules-available/mod-http-brotli.conf;"
   echo ""
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
 
   echo "Naechster Schritt: $0 install"
 }
@@ -1610,14 +1645,9 @@ package_all() {
   create_nginx_dev_package
   create_nginx_doc_package
   sign_packages
+  update_local_repo_if_configured
   log "=== Paket-Build abgeschlossen ==="
   echo ""
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
 
   echo "Naechster Schritt: $0 install"
 }
