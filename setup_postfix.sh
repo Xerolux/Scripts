@@ -147,6 +147,23 @@ Deinstallation manuell:
 EOF
 }
 
+update_local_repo_if_configured() {
+  local repo_script repo_env
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
+  repo_env="$(dirname "$0")/setup_local_repo.env"
+
+  if [ ! -x "$repo_script" ]; then
+    return 0
+  fi
+  if [ ! -f "$repo_env" ]; then
+    log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"
+    return 0
+  fi
+
+  log "Aktualisiere lokales Repository..."
+  "$repo_script" update || true
+}
+
 # ------------------------------------------------------------------------------
 # Backup
 # ------------------------------------------------------------------------------
@@ -797,13 +814,6 @@ POSTRM
   echo "HINWEIS: /etc/postfix ist NICHT im Paket."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
   echo ""
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
-
   echo "Nächster Schritt: $0 install"
 }
 
@@ -1270,12 +1280,7 @@ package_all() {
   sign_packages
   log "=== Paket-Build abgeschlossen ==="
   echo ""
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
+  update_local_repo_if_configured
 
   echo "Nächster Schritt: $0 install"
 }

@@ -168,6 +168,23 @@ Deinstallation manuell:
 EOF
 }
 
+update_local_repo_if_configured() {
+  local repo_script repo_env
+  repo_script="$(dirname "$0")/setup_local_repo.sh"
+  repo_env="$(dirname "$0")/setup_local_repo.env"
+
+  if [ ! -x "$repo_script" ]; then
+    return 0
+  fi
+  if [ ! -f "$repo_env" ]; then
+    log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"
+    return 0
+  fi
+
+  log "Aktualisiere lokales Repository..."
+  "$repo_script" update || true
+}
+
 # ------------------------------------------------------------------------------
 # Backup
 # ------------------------------------------------------------------------------
@@ -865,6 +882,23 @@ EOF
   # /etc aus Staging entfernen
   rm -rf "${STAGE_PIGEONHOLE:?}/etc"
 
+  # Runtime-only Paket: Dev-Artefakte und /usr/local Inhalte entfernen.
+  local prune_count=0
+  if [ -d "${STAGE_PIGEONHOLE}/usr/include" ]; then
+    rm -rf "${STAGE_PIGEONHOLE}/usr/include"
+    prune_count=$((prune_count + 1))
+  fi
+  if [ -d "${STAGE_PIGEONHOLE}/usr/local" ]; then
+    rm -rf "${STAGE_PIGEONHOLE}/usr/local"
+    prune_count=$((prune_count + 1))
+  fi
+  while IFS= read -r devfile; do
+    [ -n "$devfile" ] || continue
+    rm -f "$devfile"
+    prune_count=$((prune_count + 1))
+  done < <(find "${STAGE_PIGEONHOLE}/usr/lib/dovecot" -type f \( -name "*.a" -o -name "*.la" \) 2>/dev/null || true)
+  log "Pigeonhole Runtime-Cleanup: $prune_count Dev-Artefakte entfernt"
+
   log "Pigeonhole Staging-Inhalt:"
   find "$STAGE_PIGEONHOLE" \( -name "*.so" -o -name "*sieve*" -o -name "*managesieve*" \) \
     | sort | tee -a "$LOG_FILE"
@@ -924,12 +958,7 @@ EOF
   echo "HINWEIS: /etc/dovecot ist NICHT in den Paketen."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
   echo ""
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
+  update_local_repo_if_configured
 
   echo "Nächster Schritt:          $0 install"
   echo "Später deinstallieren:     $0 uninstall"
@@ -1800,6 +1829,23 @@ package_pigeonhole() {
   [ -d "$STAGE_PIGEONHOLE" ] || die "Pigeonhole-Staging fehlt nach build_pigeonhole"
   rm -rf "${STAGE_PIGEONHOLE:?}/etc"
 
+  # Runtime-only Paket: Dev-Artefakte und /usr/local Inhalte entfernen.
+  local prune_count=0
+  if [ -d "${STAGE_PIGEONHOLE}/usr/include" ]; then
+    rm -rf "${STAGE_PIGEONHOLE}/usr/include"
+    prune_count=$((prune_count + 1))
+  fi
+  if [ -d "${STAGE_PIGEONHOLE}/usr/local" ]; then
+    rm -rf "${STAGE_PIGEONHOLE}/usr/local"
+    prune_count=$((prune_count + 1))
+  fi
+  while IFS= read -r devfile; do
+    [ -n "$devfile" ] || continue
+    rm -f "$devfile"
+    prune_count=$((prune_count + 1))
+  done < <(find "${STAGE_PIGEONHOLE}/usr/lib/dovecot" -type f \( -name "*.a" -o -name "*.la" \) 2>/dev/null || true)
+  log "Pigeonhole Runtime-Cleanup: $prune_count Dev-Artefakte entfernt"
+
   log "Pigeonhole Staging-Inhalt:"
   find "$STAGE_PIGEONHOLE" \( -name "*.so" -o -name "*sieve*" -o -name "*managesieve*" \)     | sort | tee -a "$LOG_FILE"
 
@@ -1851,12 +1897,7 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
   echo ""
   log "=== Pigeonhole Paket-Build abgeschlossen ==="
   echo "Paket: $deb_sieve"
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
+  update_local_repo_if_configured
 
   echo "Nächster Schritt: $0 install"
 }
