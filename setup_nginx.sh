@@ -371,8 +371,16 @@ install_build_deps() {
     libluajit-5.1-dev \
     libperl-dev \
     ruby ruby-dev rubygems rpm \
-    wget curl git \
-    dpkg-sig
+    wget curl git
+
+  # Paketsignierung ist optional: dpkg-sig bevorzugen, debsigs als Fallback.
+  if apt-cache show dpkg-sig >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-sig || true
+  elif apt-cache show debsigs >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y debsigs || true
+  else
+    log "Kein Paketsignierungs-Tool in den Repos gefunden – Signierung wird bei Bedarf uebersprungen"
+  fi
 
   if ! command -v fpm >/dev/null 2>&1; then
     log "Installiere fpm"
@@ -828,8 +836,13 @@ generate_checksums() {
 # .deb-Pakete mit dpkg-sig signieren (optional, benoetigt GPG-Schluessel)
 # ------------------------------------------------------------------------------
 sign_packages() {
-  if ! command -v dpkg-sig >/dev/null 2>&1; then
-    log "dpkg-sig nicht installiert – ueberspringe Paketsignierung"
+  local sign_tool=""
+  if command -v dpkg-sig >/dev/null 2>&1; then
+    sign_tool="dpkg-sig"
+  elif command -v debsigs >/dev/null 2>&1; then
+    sign_tool="debsigs"
+  else
+    log "Kein Paketsignierungs-Tool installiert – ueberspringe Paketsignierung"
     return 0
   fi
 
@@ -843,18 +856,28 @@ sign_packages() {
     return 0
   fi
 
-  log "Signiere .deb-Pakete mit GPG-Schluessel $gpg_key_id..."
+  log "Signiere .deb-Pakete mit $sign_tool (GPG-Schluessel $gpg_key_id)..."
   local sign_count=0
+  local sign_fail=0
   for deb in "$PACKAGE_DIR"/*.deb; do
     [ -f "$deb" ] || continue
-    if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
-      continue
-    fi
-    if dpkg-sig -k "$gpg_key_id" --sign builder "$deb" >/dev/null 2>&1; then
+
+    if [ "$sign_tool" = "dpkg-sig" ]; then
+      if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
+        continue
+      fi
+      if dpkg-sig -k "$gpg_key_id" --sign builder "$deb" >/dev/null 2>&1; then
+        sign_count=$((sign_count + 1))
+      else
+        sign_fail=$((sign_fail + 1))
+      fi
+    elif debsigs --sign=origin --default-key="$gpg_key_id" "$deb" >/dev/null 2>&1; then
       sign_count=$((sign_count + 1))
+    else
+      sign_fail=$((sign_fail + 1))
     fi
   done
-  log "$sign_count Pakete signiert"
+  log "$sign_count Pakete signiert, $sign_fail fehlgeschlagen"
 }
 
 # ------------------------------------------------------------------------------

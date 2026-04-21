@@ -10,7 +10,7 @@
 #   - GPT-signiertes Repository (Release + InRelease)
 #   - GPG-Schluessel-Generierung und -Export
 #   - SHA256-Checksummen
-#   - dpkg-sig Paketsignierung (optional)
+#   - Paketsignierung (dpkg-sig bevorzugt, debsigs als Fallback)
 # ==============================================================================
 set -Eeuo pipefail
 
@@ -71,7 +71,7 @@ Verwendung:
   setup_local_repo.sh init-gpg      – Erstellt GPG-Schluessel (einmalig)
   setup_local_repo.sh export-key    – Exportiert oeffentlichen Schluessel nach /etc/apt/keyrings/
   setup_local_repo.sh sign-repo     – Signiert Repository neu (Release + InRelease)
-  setup_local_repo.sh sign-debs     – Signiert alle .deb-Pakete im Repo mit dpkg-sig
+  setup_local_repo.sh sign-debs     – Signiert alle .deb-Pakete im Repo (dpkg-sig/debsigs)
 USAGE
 }
 
@@ -252,16 +252,31 @@ generate_checksums() {
 }
 
 # ------------------------------------------------------------------------------
-# dpkg-sig: Alle .deb-Pakete im Repo signieren
+# Alle .deb-Pakete im Repo signieren (dpkg-sig bevorzugt, debsigs als Fallback)
 # ------------------------------------------------------------------------------
 sign_debs() {
-  log "=== Signiere .deb-Pakete mit dpkg-sig ==="
-
-  if ! command -v dpkg-sig >/dev/null 2>&1; then
-    log "Installiere dpkg-sig..."
+  local sign_tool=""
+  if command -v dpkg-sig >/dev/null 2>&1; then
+    sign_tool="dpkg-sig"
+  elif command -v debsigs >/dev/null 2>&1; then
+    sign_tool="debsigs"
+  else
+    log "Installiere Paketsignierungs-Tool..."
     apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-sig
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-sig >/dev/null 2>&1; then
+      sign_tool="dpkg-sig"
+    elif DEBIAN_FRONTEND=noninteractive apt-get install -y debsigs debsig-verify >/dev/null 2>&1 \
+      || DEBIAN_FRONTEND=noninteractive apt-get install -y debsigs >/dev/null 2>&1; then
+      sign_tool="debsigs"
+    fi
   fi
+
+  if [ -z "$sign_tool" ]; then
+    log "Kein Paketsignierungs-Tool verfuegbar – ueberspringe .deb-Signierung"
+    return 0
+  fi
+
+  log "=== Signiere .deb-Pakete mit $sign_tool ==="
 
   if ! detect_gpg_key; then
     die "Kein GPG-Schluessel. Zuerst: $0 init-gpg"
@@ -273,14 +288,22 @@ sign_debs() {
   for deb in "$REPO_DIR"/*.deb; do
     [ -f "$deb" ] || continue
 
-    if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
-      log "  [OK] $(basename "$deb") bereits signiert"
-      deb_count=$((deb_count + 1))
-      continue
-    fi
+    if [ "$sign_tool" = "dpkg-sig" ]; then
+      if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
+        log "  [OK] $(basename "$deb") bereits signiert"
+        deb_count=$((deb_count + 1))
+        continue
+      fi
 
-    log "  Signiere $(basename "$deb")..."
-    if dpkg-sig -k "$GPG_KEY_ID" --sign builder "$deb" 2>&1 | tee -a "$LOG_FILE"; then
+      log "  Signiere $(basename "$deb")..."
+      if dpkg-sig -k "$GPG_KEY_ID" --sign builder "$deb" 2>&1 | tee -a "$LOG_FILE"; then
+        deb_count=$((deb_count + 1))
+      else
+        log "  [FAIL] $(basename "$deb")"
+        deb_fail=$((deb_fail + 1))
+      fi
+    elif debsigs --sign=origin --default-key="$GPG_KEY_ID" "$deb" 2>&1 | tee -a "$LOG_FILE"; then
+      log "  [OK] $(basename "$deb") signiert"
       deb_count=$((deb_count + 1))
     else
       log "  [FAIL] $(basename "$deb")"
