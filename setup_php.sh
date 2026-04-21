@@ -829,6 +829,7 @@ download_pecl_sources() {
     local url="${PECL_GITURL[$ext]:-}"
     local ref="${PECL_GITREF[$ext]:-master}"
     local dir="${PECL_DIRNAME[$ext]:-$ext}"
+    local pkg_name="${PECL_PKGNAME[$ext]:-$ext}"
     local target="$pecl_dir/$dir"
 
     if [ "$url" = "built-in" ]; then
@@ -865,7 +866,27 @@ download_pecl_sources() {
     fi
 
     if [ "$clone_ok" -eq 0 ]; then
-      log "  [WARN] $dir konnte nicht geklont werden – ueberspringe $ext"
+      # Fallback: PECL Tarball (z.B. https://pecl.php.net/get/lz4-0.6.0.tgz)
+      local pecl_ref="$ref"
+      if [[ "$pecl_ref" =~ ^v ]]; then
+        pecl_ref="${pecl_ref#v}"
+      fi
+      local pecl_tgz_url="https://pecl.php.net/get/${pkg_name}-${pecl_ref}.tgz"
+      local pecl_tgz_file="/tmp/pecl-${pkg_name}-${pecl_ref}.tgz"
+
+      log "  [WARN] Git-Clone fehlgeschlagen, versuche PECL-Tarball: $pecl_tgz_url"
+      rm -rf "$target"
+      mkdir -p "$target"
+      if curl -fL --retry 2 --retry-delay 1 --connect-timeout 15 --progress-bar \
+        "$pecl_tgz_url" -o "$pecl_tgz_file" \
+        && tar xzf "$pecl_tgz_file" -C "$target" --strip-components=1; then
+        clone_ok=1
+      fi
+      rm -f "$pecl_tgz_file" 2>/dev/null || true
+    fi
+
+    if [ "$clone_ok" -eq 0 ]; then
+      log "  [WARN] $dir konnte weder via Git noch via PECL-Tarball geladen werden – ueberspringe $ext"
       rm -rf "$target"
       continue
     fi
