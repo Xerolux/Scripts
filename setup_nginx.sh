@@ -305,6 +305,28 @@ module_skip_reason() {
   return 1
 }
 
+has_perl_dev_headers() {
+  if pkg-config --exists perl 2>/dev/null; then
+    return 0
+  fi
+
+  if [ -f /usr/include/perl/perl.h ]; then
+    return 0
+  fi
+
+  # Ubuntu/Debian liefern perl.h oft unter .../perl/<version>/CORE/perl.h
+  local perl_core_h=""
+  if command -v perl >/dev/null 2>&1; then
+    perl_core_h="$(perl -MConfig -e 'print "$Config{archlibexp}/CORE/perl.h"' 2>/dev/null || true)"
+    if [ -n "$perl_core_h" ] && [ -f "$perl_core_h" ]; then
+      return 0
+    fi
+  fi
+
+  perl_core_h="$(find /usr/lib -path '*/perl/*/CORE/perl.h' -type f 2>/dev/null | head -1 || true)"
+  [ -n "$perl_core_h" ]
+}
+
 update_local_repo_if_configured() {
   local repo_script repo_env
   repo_script="$(dirname "$0")/setup_local_repo.sh"
@@ -729,7 +751,7 @@ build_configure_args() {
   done
 
   # Built-in dynamic modules (nicht via git, sondern in nginx-quellen)
-  if pkg-config --exists perl 2>/dev/null || [ -f /usr/include/perl/perl.h ]; then
+  if has_perl_dev_headers; then
     log "  [+] Dynamic: libnginx-mod-http-perl (built-in)"
     CONF_ARGS="$CONF_ARGS --with-http_perl_module=dynamic"
     mod_count=$((mod_count + 1))
@@ -1225,8 +1247,9 @@ create_module_packages() {
       if [ -f "$so_staging_dir/$so" ]; then
         found_any=1
       else
-        # Fallback: .so kann auch im objs/ Verzeichnis liegen
-        local objs_so="$BUILD_ROOT/nginx-${NGINX_VERSION}/objs/$so"
+        # Fallback: .so kann auch irgendwo unter objs/ liegen.
+        local objs_so=""
+        objs_so="$(find "$BUILD_ROOT/nginx-${NGINX_VERSION}/objs" -name "$so" -type f 2>/dev/null | head -1 || true)"
         if [ -f "$objs_so" ]; then
           log "  Kopiere $so aus objs/ (Fallback)"
           cp "$objs_so" "$so_staging_dir/$so"
