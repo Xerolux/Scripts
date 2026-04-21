@@ -984,6 +984,8 @@ build_php() {
   CONF_ARGS="$CONF_ARGS --with-imap=shared"
   CONF_ARGS="$CONF_ARGS --with-imap-ssl"
   CONF_ARGS="$CONF_ARGS --enable-calendar"
+  local -a conf_args_array=()
+  read -r -a conf_args_array <<< "$CONF_ARGS"
 
   CC_OPT="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2"
 
@@ -991,7 +993,7 @@ build_php() {
   set +e
   ./configure \
     --with-cc-opt="$CC_OPT" \
-    "$CONF_ARGS" \
+    "${conf_args_array[@]}" \
     2>&1 | tee -a "$LOG_FILE"
   local conf_rc=${PIPESTATUS[0]}
   set -e
@@ -1089,7 +1091,9 @@ build_pecl_extensions() {
 
       set +e
       if [ -n "$conf" ]; then
-        ./configure --with-php-config="$php_config" "$conf" 2>&1 | tee -a "$LOG_FILE"
+        local -a ext_conf_args=()
+        read -r -a ext_conf_args <<< "$conf"
+        ./configure --with-php-config="$php_config" "${ext_conf_args[@]}" 2>&1 | tee -a "$LOG_FILE"
       else
         ./configure --with-php-config="$php_config" 2>&1 | tee -a "$LOG_FILE"
       fi
