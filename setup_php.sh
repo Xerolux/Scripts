@@ -650,6 +650,23 @@ require_root() {
   [ "$EUID" -eq 0 ] || die "Bitte als root ausfuehren."
 }
 
+resolve_staged_php_tool() {
+  local tool="$1"
+  local suffixed="$STAGE_PHP$PHP_PREFIX/bin/${tool}${PHP_VER_SHORT}"
+  local plain="$STAGE_PHP$PHP_PREFIX/bin/${tool}"
+
+  if [ -x "$suffixed" ]; then
+    printf '%s' "$suffixed"
+    return 0
+  fi
+  if [ -x "$plain" ]; then
+    printf '%s' "$plain"
+    return 0
+  fi
+
+  return 1
+}
+
 usage() {
   cat <<EOF
 Verwendung:
@@ -1037,13 +1054,15 @@ stage_install() {
 # PECL-Extensions bauen (phpize + make)
 # ------------------------------------------------------------------------------
 build_pecl_extensions() {
-  local php_config="$STAGE_PHP$PHP_PREFIX/bin/php-config"
-  local phpize="$STAGE_PHP$PHP_PREFIX/bin/phpize"
+  local php_config
+  local phpize
+  php_config="$(resolve_staged_php_tool "php-config" || true)"
+  phpize="$(resolve_staged_php_tool "phpize" || true)"
   local ext_dir
-  ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$STAGE_PHP$PHP_EXTENSION_DIR")"
 
   [ -x "$php_config" ] || die "php-config nicht gefunden: $php_config"
   [ -x "$phpize" ] || die "phpize nicht gefunden: $phpize"
+  ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$STAGE_PHP$PHP_EXTENSION_DIR")"
 
   local pecl_dir="$BUILD_ROOT/php-pecl"
   local src_dir="$BUILD_ROOT/php-${PHP_VERSION}"
@@ -1596,7 +1615,9 @@ create_extension_packages() {
   local arch
   arch="$(dpkg --print-architecture)"
 
-  local php_config="$STAGE_PHP$PHP_PREFIX/bin/php-config"
+  local php_config
+  php_config="$(resolve_staged_php_tool "php-config" || true)"
+  [ -x "$php_config" ] || die "php-config nicht gefunden: $php_config"
   local ext_install_dir
   ext_install_dir="$($php_config --extension-dir 2>/dev/null || echo "$PHP_EXTENSION_DIR")"
   ext_install_dir="${ext_install_dir#"$STAGE_PHP"}"
