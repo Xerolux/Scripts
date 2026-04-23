@@ -29,6 +29,7 @@ source "setup_postfix.env"
 
 # ftp.porcupine.org ist ein FTP-Server und unterstützt kein HTTPS → http://
 POSTFIX_TARBALL_URLS=(
+  "https://github.com/vdukhovni/postfix/archive/refs/tags/v${POSTFIX_VERSION}.tar.gz"
   "https://ftp.gwdg.de/pub/misc/postfix/official/postfix-${POSTFIX_VERSION}.tar.gz"
   "https://fossies.org/linux/misc/postfix-${POSTFIX_VERSION}.tar.gz"
   "http://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
@@ -304,6 +305,12 @@ prepare_sources() {
   fi
 
   tar xzf "$pf_tar"
+  if [ ! -d "$BUILD_ROOT/postfix-${POSTFIX_VERSION}" ] && ls -d "$BUILD_ROOT/postfix-v${POSTFIX_VERSION}"* >/dev/null 2>&1; then
+    mv "$BUILD_ROOT/postfix-v${POSTFIX_VERSION}"* "$BUILD_ROOT/postfix-${POSTFIX_VERSION}"
+  elif [ ! -d "$BUILD_ROOT/postfix-${POSTFIX_VERSION}" ] && ls -d "$BUILD_ROOT/postfix-"* >/dev/null 2>&1; then
+    mv "$BUILD_ROOT/postfix-"* "$BUILD_ROOT/postfix-${POSTFIX_VERSION}"
+  fi
+
   [ -d "$BUILD_ROOT/postfix-${POSTFIX_VERSION}" ] \
     || die "Tarball entpackt kein Verzeichnis postfix-${POSTFIX_VERSION}"
   log "Quellen: $BUILD_ROOT/postfix-${POSTFIX_VERSION}"
@@ -895,12 +902,16 @@ MAPPOSTRM
 
     log "Erstelle Map-Paket: $pkg_name"
 
-    # .so finden: zuerst im Build-lib-Verzeichnis, dann im Staging
+    # .so finden: zuerst im Build-lib-Verzeichnis, dann im Staging, dann in src/util/
     local so_src=""
     if [ -f "$map_src_dir/$soname" ]; then
       so_src="$map_src_dir/$soname"
     elif [ -f "$shlib_dir/$soname" ]; then
       so_src="$shlib_dir/$soname"
+    elif [ -f "$build_dir/src/util/$soname" ]; then
+      so_src="$build_dir/src/util/$soname"
+    elif [ -f "$build_dir/src/global/$soname" ]; then
+      so_src="$build_dir/src/global/$soname"
     fi
 
     if [ -z "$so_src" ]; then

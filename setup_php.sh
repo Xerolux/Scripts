@@ -316,8 +316,8 @@ PECL_CONFIGURE[excimer]=""
 
 # --- 24. Gearman -------------------------------------------------------------
 PECL_DIRNAME[gearman]="php-gearman"
-PECL_GITURL[gearman]="https://github.com/php/pecl-job-queue-gearman.git"
-PECL_GITREF[gearman]="v2.1.4"
+PECL_GITURL[gearman]="https://github.com/wcgallego/pecl-gearman.git"
+PECL_GITREF[gearman]="gearman-2.0.6"
 PECL_PKGNAME[gearman]="gearman"
 PECL_DESC[gearman]="Gearman job server client"
 PECL_EXTNAME[gearman]="gearman"
@@ -371,8 +371,8 @@ PECL_CONFIGURE[memcache]=""
 
 # --- 29. Inotify -------------------------------------------------------------
 PECL_DIRNAME[inotify]="php-inotify"
-PECL_GITURL[inotify]="https://github.com/php/pecl-file_formats-inotify.git"
-PECL_GITREF[inotify]="3.0.1"
+PECL_GITURL[inotify]="built-in"
+PECL_GITREF[inotify]="built-in"
 PECL_PKGNAME[inotify]="inotify"
 PECL_DESC[inotify]="File system notifications (inotify)"
 PECL_EXTNAME[inotify]="inotify"
@@ -382,7 +382,7 @@ PECL_CONFIGURE[inotify]=""
 
 # --- 30. Gnupg ---------------------------------------------------------------
 PECL_DIRNAME[gnupg]="php-gnupg"
-PECL_GITURL[gnupg]="https://github.com/php/pecl-encryption-gnupg.git"
+PECL_GITURL[gnupg]="https://github.com/bukka/php-gnupg.git"
 PECL_GITREF[gnupg]="1.5.4"
 PECL_PKGNAME[gnupg]="gnupg"
 PECL_DESC[gnupg]="GnuPG encryption/signatures"
@@ -404,8 +404,8 @@ PECL_CONFIGURE[mailparse]=""
 
 # --- 32. OAuth ---------------------------------------------------------------
 PECL_DIRNAME[oauth]="php-oauth"
-PECL_GITURL[oauth]="https://github.com/php/pecl-authentication-oauth.git"
-PECL_GITREF[oauth]="2.0.10"
+PECL_GITURL[oauth]="https://github.com/php/pecl-networking-oauth.git"
+PECL_GITREF[oauth]="2.0.12"
 PECL_PKGNAME[oauth]="oauth"
 PECL_DESC[oauth]="OAuth 1.0 consumer"
 PECL_EXTNAME[oauth]="oauth"
@@ -448,8 +448,8 @@ PECL_CONFIGURE[solr]=""
 
 # --- 36. Stomp ---------------------------------------------------------------
 PECL_DIRNAME[stomp]="php-stomp"
-PECL_GITURL[stomp]="https://github.com/php/pecl-protocols-stomp.git"
-PECL_GITREF[stomp]="2.0.3"
+PECL_GITURL[stomp]="built-in"
+PECL_GITREF[stomp]="built-in"
 PECL_PKGNAME[stomp]="stomp"
 PECL_DESC[stomp]="STOMP protocol client"
 PECL_EXTNAME[stomp]="stomp"
@@ -459,8 +459,8 @@ PECL_CONFIGURE[stomp]=""
 
 # --- 37. Uploadprogress ------------------------------------------------------
 PECL_DIRNAME[uploadprogress]="php-uploadprogress"
-PECL_GITURL[uploadprogress]="https://github.com/php/pecl-file_formats-uploadprogress.git"
-PECL_GITREF[uploadprogress]="2.0.2"
+PECL_GITURL[uploadprogress]="https://github.com/php/pecl-php-uploadprogress.git"
+PECL_GITREF[uploadprogress]="uploadprogress-2.0.2"
 PECL_PKGNAME[uploadprogress]="uploadprogress"
 PECL_DESC[uploadprogress]="File upload progress tracking"
 PECL_EXTNAME[uploadprogress]="uploadprogress"
@@ -470,8 +470,8 @@ PECL_CONFIGURE[uploadprogress]=""
 
 # --- 38. Vips ----------------------------------------------------------------
 PECL_DIRNAME[vips]="php-vips"
-PECL_GITURL[vips]="https://github.com/php-vips/php-vips.git"
-PECL_GITREF[vips]="1.0.13"
+PECL_GITURL[vips]="https://github.com/libvips/php-vips-ext.git"
+PECL_GITREF[vips]="v1.0.10"
 PECL_PKGNAME[vips]="vips"
 PECL_DESC[vips]="Image processing (libvips)"
 PECL_EXTNAME[vips]="vips"
@@ -580,8 +580,8 @@ PECL_CONFIGURE[tidy]=""
 
 # --- 48. Radius --------------------------------------------------------------
 PECL_DIRNAME[radius]="php-radius"
-PECL_GITURL[radius]="https://github.com/php/pecl-authentication-radius.git"
-PECL_GITREF[radius]="1.4.0b1"
+PECL_GITURL[radius]="built-in"
+PECL_GITREF[radius]="built-in"
 PECL_PKGNAME[radius]="radius"
 PECL_DESC[radius]="RADIUS client"
 PECL_EXTNAME[radius]="radius"
@@ -782,7 +782,6 @@ install_build_deps() {
     libvips-dev \
     libkrb5-dev \
     libgearman-dev \
-    libmpdec-dev \
     libsystemd-dev \
     libre2-dev \
     libutf8proc-dev \
