@@ -1105,8 +1105,14 @@ build_pecl_extensions() {
   local inc_link="$PHP_PREFIX/include/php"
   local inc_target="$STAGE_PHP$PHP_PREFIX/include/php"
   if [ -d "$inc_target" ]; then
-    [ -L "$inc_link" ] && ! [ -e "$inc_link" ] && rm -f "$inc_link"
-    [ -e "$inc_link" ] || ln -s "$inc_target" "$inc_link"
+    if [ -L "$inc_link" ]; then
+      rm -f "$inc_link"
+      ln -s "$inc_target" "$inc_link"
+    elif [ -d "$inc_link" ]; then
+      cp -af "$inc_target/." "$inc_link/"
+    else
+      ln -s "$inc_target" "$inc_link"
+    fi
   fi
   ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$STAGE_PHP$PHP_EXTENSION_DIR")"
 
