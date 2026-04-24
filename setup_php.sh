@@ -141,7 +141,7 @@ PECL_DEPS[amqp]="php${PHP_VER_SHORT}-custom librabbitmq4"
 PECL_CONFIGURE[amqp]=""
 
 # --- 8. GRPC -----------------------------------------------------------------
-PECL_DIRNAME[grpc]="grpc-php"
+PECL_DIRNAME[grpc]="grpc"
 PECL_GITURL[grpc]="https://github.com/grpc/grpc.git"
 PECL_GITREF[grpc]="v1.71.0"
 PECL_PKGNAME[grpc]="grpc"
@@ -150,6 +150,7 @@ PECL_EXTNAME[grpc]="grpc"
 PECL_ZEND[grpc]="no"
 PECL_DEPS[grpc]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[grpc]=""
+PECL_SUBDIR[grpc]="pecl-tarball"
 
 # --- 9. YAML -----------------------------------------------------------------
 PECL_DIRNAME[yaml]="php-yaml"
@@ -362,18 +363,7 @@ PECL_ZEND[mcrypt]="no"
 PECL_DEPS[mcrypt]="php${PHP_VER_SHORT}-custom libmcrypt4"
 PECL_CONFIGURE[mcrypt]=""
 
-# --- 28. Memcache ------------------------------------------------------------
-PECL_DIRNAME[memcache]="php-memcache"
-PECL_GITURL[memcache]="https://github.com/php/pecl-caching-memcache.git"
-PECL_GITREF[memcache]="8.2"
-PECL_PKGNAME[memcache]="memcache"
-PECL_DESC[memcache]="Memcache client"
-PECL_EXTNAME[memcache]="memcache"
-PECL_ZEND[memcache]="no"
-PECL_DEPS[memcache]="php${PHP_VER_SHORT}-custom"
-PECL_CONFIGURE[memcache]=""
-
-# --- 29. Inotify -------------------------------------------------------------
+# --- 28. Inotify -------------------------------------------------------------
 PECL_DIRNAME[inotify]="php-inotify"
 PECL_GITURL[inotify]="https://github.com/php/pecl-file_formats-inotify.git"
 PECL_GITREF[inotify]="3.0.1"
@@ -584,17 +574,6 @@ PECL_ZEND[tidy]="no"
 PECL_DEPS[tidy]="php${PHP_VER_SHORT}-custom libtidy5deb1"
 PECL_CONFIGURE[tidy]=""
 
-# --- 48. Radius --------------------------------------------------------------
-PECL_DIRNAME[radius]="php-radius"
-PECL_GITURL[radius]="https://github.com/php/pecl-authentication-radius.git"
-PECL_GITREF[radius]="1.4.0b1"
-PECL_PKGNAME[radius]="radius"
-PECL_DESC[radius]="RADIUS client"
-PECL_EXTNAME[radius]="radius"
-PECL_ZEND[radius]="no"
-PECL_DEPS[radius]="php${PHP_VER_SHORT}-custom"
-PECL_CONFIGURE[radius]=""
-
 PECL_EXTENSIONS=(
   opcache
   apcu
@@ -623,7 +602,6 @@ PECL_EXTENSIONS=(
   geoip
   maxminddb
   mcrypt
-  memcache
   inotify
   gnupg
   mailparse
@@ -1128,23 +1106,86 @@ build_pecl_extensions() {
   local std_dir="$src_dir/ext/standard"
   [ -d "$std_dir" ] || mkdir -p "$std_dir"
 
+  sed -i '/typedef.*smart_string/d' "$src_dir/Zend/zend_smart_str.h" 2>/dev/null || true
+
   if [ ! -f "$std_dir/php_smart_string.h" ]; then
     cat > "$std_dir/php_smart_string.h" <<'SMART_STRING_SHIM'
 #ifndef PHP_SMART_STRING_H
 #define PHP_SMART_STRING_H
-#include "Zend/zend_smart_str.h"
-typedef smart_str smart_string;
-#define smart_string_alloc(s, len, pre) smart_str_alloc((s), (len), (pre))
-#define smart_string_free(s) smart_str_free(s)
-#define smart_string_appendc(s, c) smart_str_appendc((s), (c))
-#define smart_string_appendl(s, buf, len) smart_str_appendl((s), (buf), (len))
-#define smart_string_append(s, buf) smart_str_append((s), (buf))
-#define smart_string_append_long(s, v) smart_str_append_long((s), (v))
-#define smart_string_append_unsigned(s, v) smart_str_append_unsigned((s), (v))
-#define smart_string_append_int(s, v) smart_str_append_long((s), (v))
-#define smart_string_reset(s) smart_str_reset(s)
-#define smart_string_0(s) smart_str_0(s)
-#define smart_string_extend(s, len, pre) smart_str_extend((s), (len), (pre))
+
+#include <string.h>
+#include <Zend/zend.h>
+
+typedef struct {
+    char *c;
+    size_t len;
+    size_t a;
+} smart_string;
+
+#define SMART_STRING_OVERHEAD 128
+
+static zend_always_inline size_t smart_string_chunksz(smart_string *str, size_t len) {
+    return str->a ? str->a + (str->a >> 2) : len + SMART_STRING_OVERHEAD;
+}
+
+static zend_always_inline void smart_string_alloc(smart_string *str, size_t len, zend_bool pre) {
+    if (!pre && str->c && str->len + len < str->a) {
+        return;
+    }
+    str->a = smart_string_chunksz(str, len);
+    str->c = pre ? perealloc(str->c, str->a, pre) : erealloc(str->c, str->a);
+}
+
+static zend_always_inline void smart_string_extend(smart_string *str, size_t len, zend_bool pre) {
+    smart_string_alloc(str, len, pre);
+}
+
+static zend_always_inline void smart_string_appendc(smart_string *str, char c) {
+    smart_string_alloc(str, 1, 0);
+    str->c[str->len++] = c;
+}
+
+static zend_always_inline void smart_string_appendl(smart_string *str, const char *buf, size_t len) {
+    smart_string_alloc(str, len, 0);
+    memcpy(str->c + str->len, buf, len);
+    str->len += len;
+}
+
+static zend_always_inline void smart_string_append(smart_string *str, const char *buf) {
+    smart_string_appendl(str, buf, strlen(buf));
+}
+
+static zend_always_inline void smart_string_append_long(smart_string *str, zend_long val) {
+    char buf[32];
+    size_t len = snprintf(buf, sizeof(buf), ZEND_LONG_FMT, val);
+    smart_string_appendl(str, buf, len);
+}
+
+static zend_always_inline void smart_string_append_unsigned(smart_string *str, zend_ulong val) {
+    char buf[32];
+    size_t len = snprintf(buf, sizeof(buf), ZEND_ULONG_FMT, val);
+    smart_string_appendl(str, buf, len);
+}
+
+#define smart_string_append_int(s, v) smart_string_append_long((s), (v))
+
+static zend_always_inline void smart_string_reset(smart_string *str) {
+    if (str->c) {
+        str->len = 0;
+    }
+}
+
+static zend_always_inline void smart_string_free(smart_string *str) {
+    if (str->c) {
+        efree(str->c);
+        str->c = NULL;
+    }
+    str->len = 0;
+    str->a = 0;
+}
+
+#define smart_string_0(s) smart_string_appendc((s), '\0')
+
 #endif
 SMART_STRING_SHIM
     log "  Shim: php_smart_string.h erstellt"
