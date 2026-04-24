@@ -60,7 +60,7 @@ PHP_MODS_AVAIL="/usr/share/php/${PHP_VER_SHORT}/mods-available"
 # PECL_EXTNAME    – Name der .so Datei (ohne Pfad)
 # ------------------------------------------------------------------------------
 declare -A PECL_GITURL PECL_GITREF PECL_DIRNAME PECL_PKGNAME PECL_DESC \
-           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME PECL_SUBDIR
+           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME PECL_SUBDIR PECL_CMAKE
 
 # --- 1. OPcache --------------------------------------------------------------
 PECL_DIRNAME[opcache]="opcache"
@@ -126,6 +126,8 @@ PECL_EXTNAME[mongodb]="mongodb"
 PECL_ZEND[mongodb]="no"
 PECL_DEPS[mongodb]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[mongodb]=""
+PECL_SUBDIR[mongodb]="pecl-tarball"
+PECL_CMAKE[mongodb]="yes"
 
 # --- 7. AMQP -----------------------------------------------------------------
 PECL_DIRNAME[amqp]="php-amqp"
@@ -174,7 +176,7 @@ PECL_CONFIGURE[ssh2]=""
 # --- 11. Swoole --------------------------------------------------------------
 PECL_DIRNAME[swoole]="swoole-src"
 PECL_GITURL[swoole]="https://github.com/swoole/swoole-src.git"
-PECL_GITREF[swoole]="v6.0.1"
+PECL_GITREF[swoole]="master"
 PECL_PKGNAME[swoole]="swoole"
 PECL_DESC[swoole]="Async concurrency framework"
 PECL_EXTNAME[swoole]="swoole"
@@ -743,7 +745,7 @@ install_build_deps() {
 
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    build-essential make m4 pkg-config autoconf automake libtool bison re2c \
+    build-essential make m4 pkg-config autoconf automake libtool bison re2c cmake \
     libssl-dev \
     libpcre2-dev \
     zlib1g-dev \
@@ -795,6 +797,8 @@ install_build_deps() {
     libbz2-dev \
     liblz4-dev \
     libzmq3-dev \
+    libabsl-dev \
+    libxlsxwriter-dev \
     ruby ruby-dev rubygems rpm \
     wget curl git
 
@@ -1122,6 +1126,71 @@ build_pecl_extensions() {
   rm -rf "$pecl_log_dir"
   mkdir -p "$pecl_log_dir"
 
+  local std_dir="$src_dir/ext/standard"
+  [ -d "$std_dir" ] || mkdir -p "$std_dir"
+
+  if [ ! -f "$std_dir/php_smart_string.h" ]; then
+    cat > "$std_dir/php_smart_string.h" <<'SMART_STRING_SHIM'
+#ifndef PHP_SMART_STRING_H
+#define PHP_SMART_STRING_H
+#include "Zend/zend_smart_str.h"
+typedef smart_str smart_string;
+#define smart_string_alloc(s, len, pre) smart_str_alloc((s), (len), (pre))
+#define smart_string_free(s) smart_str_free(s)
+#define smart_string_appendc(s, c) smart_str_appendc((s), (c))
+#define smart_string_appendl(s, buf, len) smart_str_appendl((s), (buf), (len))
+#define smart_string_append(s, buf) smart_str_append((s), (buf))
+#define smart_string_append_long(s, v) smart_str_append_long((s), (v))
+#define smart_string_append_unsigned(s, v) smart_str_append_unsigned((s), (v))
+#define smart_string_append_int(s, v) smart_str_append_long((s), (v))
+#define smart_string_reset(s) smart_str_reset(s)
+#define smart_string_0(s) smart_str_0(s)
+#define smart_string_extend(s, len, pre) smart_str_extend((s), (len), (pre))
+#endif
+SMART_STRING_SHIM
+    log "  Shim: php_smart_string.h erstellt"
+  fi
+
+  if [ ! -f "$std_dir/php_smart_str.h" ]; then
+    cat > "$std_dir/php_smart_str.h" <<'SMART_STR_SHIM'
+#ifndef PHP_SMART_STR_H
+#define PHP_SMART_STR_H
+#include "Zend/zend_smart_str.h"
+#endif
+SMART_STR_SHIM
+    log "  Shim: php_smart_str.h erstellt"
+  fi
+
+  if [ ! -f "$std_dir/php_smart_str_public.h" ]; then
+    cat > "$std_dir/php_smart_str_public.h" <<'SMART_STR_PUBLIC_SHIM'
+#ifndef PHP_SMART_STR_PUBLIC_H
+#define PHP_SMART_STR_PUBLIC_H
+#include "Zend/zend_smart_str.h"
+#endif
+SMART_STR_PUBLIC_SHIM
+    log "  Shim: php_smart_str_public.h erstellt"
+  fi
+
+  if [ ! -f "$std_dir/php_rand.h" ]; then
+    cat > "$std_dir/php_rand.h" <<'RAND_SHIM'
+#ifndef PHP_RAND_H
+#define PHP_RAND_H
+#include "ext/random/php_random.h"
+#endif
+RAND_SHIM
+    log "  Shim: php_rand.h erstellt"
+  fi
+
+  if [ ! -f "$std_dir/datetime.h" ]; then
+    cat > "$std_dir/datetime.h" <<'DATETIME_SHIM'
+#ifndef PHP_DATETIME_STANDARD_H
+#define PHP_DATETIME_STANDARD_H
+#include "ext/date/php_date.h"
+#endif
+DATETIME_SHIM
+    log "  Shim: datetime.h erstellt"
+  fi
+
   for ext in "${PECL_EXTENSIONS[@]}"; do
     local url="${PECL_GITURL[$ext]}"
     local ext_dir_src="${PECL_DIRNAME[$ext]}"
@@ -1147,7 +1216,7 @@ build_pecl_extensions() {
         log "  [SKIP] $ext – Quellen nicht gefunden ($target)"
         continue
       fi
-      if [ ! -f "$target/config.m4" ]; then
+      if [ ! -f "$target/config.m4" ] && [ "${PECL_CMAKE[$ext]:-}" != "yes" ]; then
         log "  [SKIP] $ext – config.m4 nicht gefunden in $target"
         continue
       fi
@@ -1157,6 +1226,32 @@ build_pecl_extensions() {
 
     local src_inc="-I$src_dir"
     local ext_log="$pecl_log_dir/${ext}.log"
+
+    if [ "${PECL_CMAKE[$ext]:-}" = "yes" ]; then
+      (
+        cd "$target"
+        mkdir -p build
+        log "  cmake fuer $ext"
+        set +e
+        cmake -DCMAKE_INSTALL_PREFIX=/usr \
+          -DPHP_CONFIG="$php_config" \
+          -DCMAKE_C_FLAGS="$src_inc" \
+          -S . -B build 2>&1 | tee "$ext_log"
+        local cmakerc=${PIPESTATUS[0]}
+        set -e
+        [ "$cmakerc" -eq 0 ] || { log "  [FAIL] cmake fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
+
+        set +e
+        cmake --build build -j"$(nproc)" 2>&1 | tee -a "$ext_log"
+        local mkrc=${PIPESTATUS[0]}
+        set -e
+        [ "$mkrc" -eq 0 ] || { log "  [FAIL] cmake build fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
+
+        cmake --install build --prefix /usr DESTDIR="$STAGE_PHP" 2>&1 | tee -a "$ext_log"
+        log "  [OK] $ext gebaut und installiert (cmake)"
+      ) || true
+      continue
+    fi
 
     (
       cd "$target"
