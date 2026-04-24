@@ -1079,7 +1079,7 @@ stage_install() {
   log "/etc/php aus Staging entfernt"
 
   log "Staging-Inhalt:"
-  find "$STAGE_PHP/usr" -type f \( -name "php*" -o -name "*.so" \) | sort | head -50 | tee -a "$LOG_FILE"
+  find "$STAGE_PHP/usr" -type f \( -name "php*" -o -name "*.so" \) | sort | head -50 | tee -a "$LOG_FILE" || true
 }
 
 # ------------------------------------------------------------------------------
