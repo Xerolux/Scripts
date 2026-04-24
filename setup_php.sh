@@ -1095,14 +1095,18 @@ build_pecl_extensions() {
   [ -x "$php_config" ] || die "php-config nicht gefunden: $php_config"
   [ -x "$phpize" ] || die "phpize nicht gefunden: $phpize"
 
-  local build_dir="$STAGE_PHP$PHP_PREFIX/lib/php/build"
-  if [ -d "$build_dir" ] && [ ! -d "$PHP_PREFIX/lib/php/build" ]; then
-    ln -s "$build_dir" "$PHP_PREFIX/lib/php/build"
+  local build_link="$PHP_PREFIX/lib/php/build"
+  local build_target="$STAGE_PHP$PHP_PREFIX/lib/php/build"
+  if [ -d "$build_target" ]; then
+    [ -L "$build_link" ] && ! [ -e "$build_link" ] && rm -f "$build_link"
+    [ -e "$build_link" ] || ln -s "$build_target" "$build_link"
   fi
 
-  local inc_dir="$STAGE_PHP$PHP_PREFIX/include/php"
-  if [ -d "$inc_dir" ] && [ ! -d "$PHP_PREFIX/include/php" ]; then
-    ln -s "$inc_dir" "$PHP_PREFIX/include/php"
+  local inc_link="$PHP_PREFIX/include/php"
+  local inc_target="$STAGE_PHP$PHP_PREFIX/include/php"
+  if [ -d "$inc_target" ]; then
+    [ -L "$inc_link" ] && ! [ -e "$inc_link" ] && rm -f "$inc_link"
+    [ -e "$inc_link" ] || ln -s "$inc_target" "$inc_link"
   fi
   ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$STAGE_PHP$PHP_EXTENSION_DIR")"
 
