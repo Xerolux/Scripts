@@ -60,10 +60,10 @@ PHP_MODS_AVAIL="/usr/share/php/${PHP_VER_SHORT}/mods-available"
 # PECL_EXTNAME    – Name der .so Datei (ohne Pfad)
 # ------------------------------------------------------------------------------
 declare -A PECL_GITURL PECL_GITREF PECL_DIRNAME PECL_PKGNAME PECL_DESC \
-           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME
+           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME PECL_SUBDIR
 
 # --- 1. OPcache --------------------------------------------------------------
-PECL_DIRNAME[opcache]="php-src-ext-opcache"
+PECL_DIRNAME[opcache]="opcache"
 PECL_PKGNAME[opcache]="opcache"
 PECL_DESC[opcache]="OPcache bytecode cache (zend_extension)"
 PECL_ZEND[opcache]="yes"
@@ -203,6 +203,7 @@ PECL_EXTNAME[protobuf]="protobuf"
 PECL_ZEND[protobuf]="no"
 PECL_DEPS[protobuf]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[protobuf]=""
+PECL_SUBDIR[protobuf]="pecl-tarball"
 
 # --- 14. Igbinary ------------------------------------------------------------
 PECL_DIRNAME[igbinary]="igbinary"
@@ -346,6 +347,7 @@ PECL_EXTNAME[maxminddb]="maxminddb"
 PECL_ZEND[maxminddb]="no"
 PECL_DEPS[maxminddb]="php${PHP_VER_SHORT}-custom libmaxminddb0"
 PECL_CONFIGURE[maxminddb]=""
+PECL_SUBDIR[maxminddb]="ext"
 
 # --- 27. Mcrypt --------------------------------------------------------------
 PECL_DIRNAME[mcrypt]="php-mcrypt"
@@ -489,6 +491,7 @@ PECL_EXTNAME[xhprof]="xhprof"
 PECL_ZEND[xhprof]="no"
 PECL_DEPS[xhprof]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[xhprof]=""
+PECL_SUBDIR[xhprof]="extension"
 
 # --- 40. Xlswriter -----------------------------------------------------------
 PECL_DIRNAME[xlswriter]="php-xlswriter"
@@ -544,6 +547,7 @@ PECL_EXTNAME[opentelemetry]="opentelemetry"
 PECL_ZEND[opentelemetry]="no"
 PECL_DEPS[opentelemetry]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[opentelemetry]=""
+PECL_SUBDIR[opentelemetry]="ext"
 
 # --- 45. IMAP ----------------------------------------------------------------
 PECL_DIRNAME[imap]="php-imap"
@@ -557,7 +561,7 @@ PECL_DEPS[imap]="php${PHP_VER_SHORT}-custom libc-client2007e"
 PECL_CONFIGURE[imap]="--with-kerberos --with-imap-ssl"
 
 # --- 46. SNMP ----------------------------------------------------------------
-PECL_DIRNAME[snmp]="php-snmp"
+PECL_DIRNAME[snmp]="snmp"
 PECL_GITURL[snmp]="built-in"
 PECL_GITREF[snmp]="built-in"
 PECL_PKGNAME[snmp]="snmp"
@@ -568,7 +572,7 @@ PECL_DEPS[snmp]="php${PHP_VER_SHORT}-custom libsnmp40"
 PECL_CONFIGURE[snmp]=""
 
 # --- 47. Tidy ----------------------------------------------------------------
-PECL_DIRNAME[tidy]="php-tidy"
+PECL_DIRNAME[tidy]="tidy"
 PECL_GITURL[tidy]="built-in"
 PECL_GITREF[tidy]="built-in"
 PECL_PKGNAME[tidy]="tidy"
@@ -853,6 +857,34 @@ download_pecl_sources() {
     if [ "$url" = "built-in" ]; then
       continue
     fi
+
+    local subdir="${PECL_SUBDIR[$ext]:-}"
+
+    if [ "$subdir" = "pecl-tarball" ]; then
+      if [ -d "$target" ]; then
+        log "  [OK] $dir bereits vorhanden"
+        continue
+      fi
+      local pecl_ref="$ref"
+      if [[ "$pecl_ref" =~ ^v ]]; then
+        pecl_ref="${pecl_ref#v}"
+      fi
+      local pecl_tgz_url="https://pecl.php.net/get/${pkg_name}-${pecl_ref}.tgz"
+      local pecl_tgz_file="/tmp/pecl-${pkg_name}-${pecl_ref}.tgz"
+      log "Lade $dir via PECL-Tarball ($pecl_tgz_url)"
+      mkdir -p "$target"
+      if curl -fL --retry 2 --retry-delay 1 --connect-timeout 15 --progress-bar \
+        "$pecl_tgz_url" -o "$pecl_tgz_file" \
+        && tar xzf "$pecl_tgz_file" -C "$target" --strip-components=1; then
+        rm -f "$pecl_tgz_file" 2>/dev/null || true
+        log "  [OK] $dir via PECL-Tarball geladen"
+      else
+        rm -rf "$target" "$pecl_tgz_file" 2>/dev/null || true
+        log "  [WARN] $dir konnte nicht via PECL-Tarball geladen werden – ueberspringe $ext"
+      fi
+      continue
+    fi
+
     if [ -z "$url" ]; then
       log "  [WARN] $ext: keine PECL_GITURL gesetzt – ueberspringe"
       continue
@@ -1085,11 +1117,6 @@ build_pecl_extensions() {
 
     if [ "$url" = "built-in" ]; then
       local built_in_dir="$src_dir/ext/${ext_dir_src}"
-      if [ "$ext" = "snmp" ]; then
-        built_in_dir="$src_dir/ext/snmp"
-      elif [ "$ext" = "tidy" ]; then
-        built_in_dir="$src_dir/ext/tidy"
-      fi
 
       if [ -d "$built_in_dir" ] && [ -f "$built_in_dir/config.m4" ]; then
         target="$built_in_dir"
@@ -1099,8 +1126,16 @@ build_pecl_extensions() {
       fi
     else
       target="$pecl_dir/$ext_dir_src"
+      local subdir="${PECL_SUBDIR[$ext]:-}"
+      if [ -n "$subdir" ] && [ "$subdir" != "pecl-tarball" ]; then
+        target="$target/$subdir"
+      fi
       if [ ! -d "$target" ]; then
         log "  [SKIP] $ext – Quellen nicht gefunden ($target)"
+        continue
+      fi
+      if [ ! -f "$target/config.m4" ]; then
+        log "  [SKIP] $ext – config.m4 nicht gefunden in $target"
         continue
       fi
     fi
