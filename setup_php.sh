@@ -1118,6 +1118,9 @@ build_pecl_extensions() {
 
   local pecl_dir="$BUILD_ROOT/php-pecl"
   local src_dir="$BUILD_ROOT/php-${PHP_VERSION}"
+  local pecl_log_dir="/tmp/pecl-build-logs"
+  rm -rf "$pecl_log_dir"
+  mkdir -p "$pecl_log_dir"
 
   for ext in "${PECL_EXTENSIONS[@]}"; do
     local url="${PECL_GITURL[$ext]}"
@@ -1153,6 +1156,7 @@ build_pecl_extensions() {
     log "Baue PECL: $ext ($ext_dir_src)"
 
     local src_inc="-I$src_dir"
+    local ext_log="$pecl_log_dir/${ext}.log"
 
     (
       cd "$target"
@@ -1161,30 +1165,30 @@ build_pecl_extensions() {
       "$phpize" --clean 2>/dev/null || true
 
       set +e
-      "$phpize" 2>&1 | tee -a "$LOG_FILE"
+      "$phpize" 2>&1 | tee "$ext_log"
       local phprc=${PIPESTATUS[0]}
       set -e
-      [ "$phprc" -eq 0 ] || { log "  [FAIL] phpize fuer $ext fehlgeschlagen"; exit 0; }
+      [ "$phprc" -eq 0 ] || { log "  [FAIL] phpize fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
 
       set +e
       if [ -n "$conf" ]; then
         local -a ext_conf_args=()
         read -r -a ext_conf_args <<< "$conf"
-        ./configure --with-php-config="$php_config" EXTRA_CFLAGS="$src_inc" "${ext_conf_args[@]}" 2>&1 | tee -a "$LOG_FILE"
+        ./configure --with-php-config="$php_config" EXTRA_CFLAGS="$src_inc" "${ext_conf_args[@]}" 2>&1 | tee -a "$ext_log"
       else
-        ./configure --with-php-config="$php_config" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$LOG_FILE"
+        ./configure --with-php-config="$php_config" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$ext_log"
       fi
       local confrc=${PIPESTATUS[0]}
       set -e
-      [ "$confrc" -eq 0 ] || { log "  [FAIL] configure fuer $ext fehlgeschlagen"; exit 0; }
+      [ "$confrc" -eq 0 ] || { log "  [FAIL] configure fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
 
       set +e
-      make -j"$(nproc)" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$LOG_FILE"
+      make -j"$(nproc)" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$ext_log"
       local mkrc=${PIPESTATUS[0]}
       set -e
-      [ "$mkrc" -eq 0 ] || { log "  [FAIL] make fuer $ext fehlgeschlagen"; exit 0; }
+      [ "$mkrc" -eq 0 ] || { log "  [FAIL] make fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
 
-      make install INSTALL_ROOT="$STAGE_PHP" 2>&1 | tee -a "$LOG_FILE"
+      make install INSTALL_ROOT="$STAGE_PHP" 2>&1 | tee -a "$ext_log"
       log "  [OK] $ext gebaut und installiert"
     ) || true
   done
