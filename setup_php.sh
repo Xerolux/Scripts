@@ -1237,6 +1237,13 @@ DATETIME_SHIM
     local conf="${PECL_CONFIGURE[$ext]}"
     local target
 
+    local _pkg_name="${PECL_PKGNAME[$ext]}"
+    local _deb_pattern="php${PHP_VER_SHORT}-${_pkg_name}_*_*.deb"
+    if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -d "$PACKAGE_DIR" ] && compgen -G "$PACKAGE_DIR/$_deb_pattern" >/dev/null 2>&1; then
+      log "  [OK] $ext – .deb bereits vorhanden, ueberspringe Build"
+      continue
+    fi
+
     if [ "$url" = "built-in" ]; then
       local built_in_dir="$src_dir/ext/${ext_dir_src}"
 
@@ -1837,6 +1844,12 @@ create_extension_packages() {
     local extname="${PECL_EXTNAME[$ext]}"
     local deps="${PECL_DEPS[$ext]}"
     local is_zend="${PECL_ZEND[$ext]}"
+
+    local _deb_pattern="php${PHP_VER_SHORT}-${pkg_name}_*_*.deb"
+    if [ "${FORCE_REBUILD:-no}" != "yes" ] && compgen -G "$PACKAGE_DIR/$_deb_pattern" >/dev/null 2>&1; then
+      pkg_ok=$((pkg_ok + 1))
+      continue
+    fi
 
     local so_file="$STAGE_PHP${ext_install_dir}/${extname}.so"
     if [ ! -f "$so_file" ]; then
