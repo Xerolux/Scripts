@@ -1107,9 +1107,11 @@ build_pecl_extensions() {
   [ -d "$std_dir" ] || mkdir -p "$std_dir"
 
   sed -i '/typedef.*smart_string/d' "$src_dir/Zend/zend_smart_str.h" 2>/dev/null || true
+  grep -rl 'typedef.*smart_string' "$src_dir/Zend/" "$src_dir/main/" 2>/dev/null | while read -r _f; do
+    sed -i '/typedef.*smart_string/d' "$_f"
+  done || true
 
-  if [ ! -f "$std_dir/php_smart_string.h" ]; then
-    cat > "$std_dir/php_smart_string.h" <<'SMART_STRING_SHIM'
+  cat > "$std_dir/php_smart_string.h" <<'SMART_STRING_SHIM'
 #ifndef PHP_SMART_STRING_H
 #define PHP_SMART_STRING_H
 
@@ -1188,8 +1190,7 @@ static zend_always_inline void smart_string_free(smart_string *str) {
 
 #endif
 SMART_STRING_SHIM
-    log "  Shim: php_smart_string.h erstellt"
-  fi
+  log "  Shim: php_smart_string.h erzwungen"
 
   if [ ! -f "$std_dir/php_smart_str.h" ]; then
     cat > "$std_dir/php_smart_str.h" <<'SMART_STR_SHIM'
