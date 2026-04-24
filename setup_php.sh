@@ -1067,6 +1067,11 @@ build_pecl_extensions() {
   if [ -d "$build_dir" ] && [ ! -d "$PHP_PREFIX/lib/php/build" ]; then
     ln -s "$build_dir" "$PHP_PREFIX/lib/php/build"
   fi
+
+  local inc_dir="$STAGE_PHP$PHP_INCDIR"
+  if [ -d "$inc_dir" ] && [ ! -d "$PHP_INCDIR" ]; then
+    ln -s "$inc_dir" "$PHP_INCDIR"
+  fi
   ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$STAGE_PHP$PHP_EXTENSION_DIR")"
 
   local pecl_dir="$BUILD_ROOT/php-pecl"
@@ -1464,7 +1469,15 @@ create_fpm_package() {
   mkdir -p "$fpm_stage/lib/systemd/system"
   mkdir -p "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/fpm"
 
-  cp "$STAGE_PHP/usr/sbin/php-fpm" "$fpm_stage/usr/sbin/php-fpm${PHP_VER_SHORT}"
+  local fpm_src=""
+  for candidate in "$STAGE_PHP/usr/sbin/php-fpm${PHP_VER_SHORT}" "$STAGE_PHP/usr/sbin/php-fpm"; do
+    if [ -f "$candidate" ]; then
+      fpm_src="$candidate"
+      break
+    fi
+  done
+  [ -n "$fpm_src" ] || die "php-fpm Binary nicht gefunden in $STAGE_PHP/usr/sbin/"
+  cp "$fpm_src" "$fpm_stage/usr/sbin/php-fpm${PHP_VER_SHORT}"
   chmod 755 "$fpm_stage/usr/sbin/php-fpm${PHP_VER_SHORT}"
 
   cat > "$fpm_stage/lib/systemd/system/php${PHP_VER_SHORT}-fpm.service" <<FPMUNIT
