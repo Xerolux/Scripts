@@ -1062,6 +1062,11 @@ build_pecl_extensions() {
 
   [ -x "$php_config" ] || die "php-config nicht gefunden: $php_config"
   [ -x "$phpize" ] || die "phpize nicht gefunden: $phpize"
+
+  local build_dir="$STAGE_PHP$PHP_PREFIX/lib/php/build"
+  if [ -d "$build_dir" ] && [ ! -d "$PHP_PREFIX/lib/php/build" ]; then
+    ln -s "$build_dir" "$PHP_PREFIX/lib/php/build"
+  fi
   ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$STAGE_PHP$PHP_EXTENSION_DIR")"
 
   local pecl_dir="$BUILD_ROOT/php-pecl"
@@ -1195,10 +1200,10 @@ command -v systemctl >/dev/null 2>&1 && systemctl enable php${PHP_VER_SHORT}-fpm
 # Copy default FPM configs on fresh install
 FPM_SHARE="/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm"
 FPM_ETC="/etc/php/${PHP_VER_SHORT}/fpm"
-if [ ! -f "${FPM_ETC}/php-fpm.conf" ] && [ -d "$FPM_SHARE" ]; then
+if [ ! -f "\${FPM_ETC}/php-fpm.conf" ] && [ -d "\$FPM_SHARE" ]; then
   echo "INFO: Keine FPM-Konfiguration gefunden – installiere Defaults"
-  cp "$FPM_SHARE/php-fpm.conf" "${FPM_ETC}/php-fpm.conf"
-  cp "$FPM_SHARE/pool.d/www.conf" "${FPM_ETC}/pool.d/www.conf"
+  cp "\$FPM_SHARE/php-fpm.conf" "\${FPM_ETC}/php-fpm.conf"
+  cp "\$FPM_SHARE/pool.d/www.conf" "\${FPM_ETC}/pool.d/www.conf"
 fi
 FPMPINST
   chmod 755 "$fpm_postinst"
