@@ -1152,6 +1152,8 @@ build_pecl_extensions() {
 
     log "Baue PECL: $ext ($ext_dir_src)"
 
+    local src_inc="-I$src_dir"
+
     (
       cd "$target"
       log "  phpize fuer $ext"
@@ -1168,16 +1170,16 @@ build_pecl_extensions() {
       if [ -n "$conf" ]; then
         local -a ext_conf_args=()
         read -r -a ext_conf_args <<< "$conf"
-        ./configure --with-php-config="$php_config" "${ext_conf_args[@]}" 2>&1 | tee -a "$LOG_FILE"
+        ./configure --with-php-config="$php_config" EXTRA_CFLAGS="$src_inc" "${ext_conf_args[@]}" 2>&1 | tee -a "$LOG_FILE"
       else
-        ./configure --with-php-config="$php_config" 2>&1 | tee -a "$LOG_FILE"
+        ./configure --with-php-config="$php_config" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$LOG_FILE"
       fi
       local confrc=${PIPESTATUS[0]}
       set -e
       [ "$confrc" -eq 0 ] || { log "  [FAIL] configure fuer $ext fehlgeschlagen"; exit 0; }
 
       set +e
-      make -j"$(nproc)" 2>&1 | tee -a "$LOG_FILE"
+      make -j"$(nproc)" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$LOG_FILE"
       local mkrc=${PIPESTATUS[0]}
       set -e
       [ "$mkrc" -eq 0 ] || { log "  [FAIL] make fuer $ext fehlgeschlagen"; exit 0; }
