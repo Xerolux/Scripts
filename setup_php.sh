@@ -1068,9 +1068,9 @@ build_pecl_extensions() {
     ln -s "$build_dir" "$PHP_PREFIX/lib/php/build"
   fi
 
-  local inc_dir="$STAGE_PHP$PHP_INCDIR"
-  if [ -d "$inc_dir" ] && [ ! -d "$PHP_INCDIR" ]; then
-    ln -s "$inc_dir" "$PHP_INCDIR"
+  local inc_dir="$STAGE_PHP$PHP_PREFIX/include/php"
+  if [ -d "$inc_dir" ] && [ ! -d "$PHP_PREFIX/include/php" ]; then
+    ln -s "$inc_dir" "$PHP_PREFIX/include/php"
   fi
   ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$STAGE_PHP$PHP_EXTENSION_DIR")"
 
