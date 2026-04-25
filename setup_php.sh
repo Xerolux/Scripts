@@ -875,16 +875,30 @@ download_pecl_sources() {
     fi
 
     if [ -d "$target" ]; then
-      if [ "${PECL_SUBMODULES[$ext]:-}" = "yes" ] && [ -d "$target/.git" ]; then
-        if [ -z "$(git -C "$target" submodule status 2>/dev/null | grep -v '^-' | head -1)" ]; then
-          log "  Initialisiere fehlende Submodules fuer $dir"
-          git -C "$target" submodule update --init --recursive --depth 1 2>&1 || {
-            log "  [WARN] Submodule-Init fuer $dir fehlgeschlagen – Build evtl. unvollstaendig"
-          }
+      local _stale=0
+      if [ "${PECL_CMAKE[$ext]:-}" = "yes" ] && [ ! -f "$target/CMakeLists.txt" ]; then
+        _stale=1
+      elif [ "${PECL_CMAKE[$ext]:-}" != "yes" ] && [ ! -f "$target/config.m4" ]; then
+        local _subdir="${PECL_SUBDIR[$ext]:-}"
+        if [ -z "$_subdir" ] || [ "$_subdir" = "pecl-tarball" ]; then
+          _stale=1
         fi
       fi
-      log "  [OK] $dir bereits vorhanden"
-      continue
+      if [ "$_stale" -eq 1 ]; then
+        log "  $dir existiert aber ist unvollstaendig – entferne und lade neu"
+        rm -rf "$target"
+      else
+        if [ "${PECL_SUBMODULES[$ext]:-}" = "yes" ] && [ -d "$target/.git" ]; then
+          if [ -z "$(git -C "$target" submodule status 2>/dev/null | grep -v '^-' | head -1)" ]; then
+            log "  Initialisiere fehlende Submodules fuer $dir"
+            git -C "$target" submodule update --init --recursive --depth 1 2>&1 || {
+              log "  [WARN] Submodule-Init fuer $dir fehlgeschlagen – Build evtl. unvollstaendig"
+            }
+          fi
+        fi
+        log "  [OK] $dir bereits vorhanden"
+        continue
+      fi
     fi
 
     log "Lade $dir ($ref)"
@@ -1129,25 +1143,91 @@ build_pecl_extensions() {
 #ifndef PHP_SMART_STRING_H
 #define PHP_SMART_STRING_H
 
-/* PHP 8.5+ compatibility: smart_string is now { zend_string *s; }
-   defined in Zend/zend_smart_string_public.h (included by zend.h).
-   All smart_string_* functions are provided by Zend/zend_smart_str.h.
-   This header only adds backward-compatible functions removed in PHP 8.5. */
+/* PHP 8.5 removed zend_smart_string.h and php_smart_string.h.
+   The smart_string type { char *c; size_t len; size_t a; } still
+   exists in zend_smart_string_public.h (included via zend.h).
+   Provide the full smart_string API inline for PECL compatibility. */
 
 #include "Zend/zend.h"
-#include "Zend/zend_smart_str.h"
+#include "Zend/zend_smart_string_public.h"
 
-/* smart_string_appends was removed in PHP 8.5 - provide as wrapper */
-#ifndef smart_string_appends
-static zend_always_inline void smart_string_appends(smart_string *str, const char *buf) {
-    smart_str_appendl(&str->s, buf, strlen(buf));
+static zend_always_inline size_t _php85_ss_alloc(smart_string *str, size_t len, bool persistent) {
+	if (UNEXPECTED(!str->c) || UNEXPECTED(len >= str->a - str->len)) {
+		size_t new_len = str->len + len;
+		size_t new_a = new_len + (new_len >> 2) + 16;
+		str->a = new_a;
+		if (str->c) {
+			str->c = perealloc(str->c, new_a, persistent);
+		} else {
+			str->c = pemalloc(new_a, persistent);
+		}
+	}
+	return str->len + len;
 }
-#endif
 
-/* smart_string_0 was removed in PHP 8.5 */
-#ifndef smart_string_0
-#define smart_string_0(s) smart_str_appendc(&(s)->s, '\0')
-#endif
+static zend_always_inline void smart_string_free_ex(smart_string *str, bool persistent) {
+	if (str->c) {
+		pefree(str->c, persistent);
+		str->c = NULL;
+	}
+	str->a = str->len = 0;
+}
+#define smart_string_free(s) smart_string_free_ex((s), 0)
+
+static zend_always_inline void smart_string_0(smart_string *str) {
+	if (str->c) {
+		str->c[str->len] = '\0';
+	}
+}
+
+static zend_always_inline void smart_string_appendc_ex(smart_string *dest, char ch, bool persistent) {
+	dest->len = _php85_ss_alloc(dest, 1, persistent);
+	dest->c[dest->len - 1] = ch;
+}
+#define smart_string_appendc(str, c) smart_string_appendc_ex((str), (c), 0)
+
+static zend_always_inline void smart_string_appendl_ex(smart_string *dest, const char *str, size_t len, bool persistent) {
+	size_t new_len = _php85_ss_alloc(dest, len, persistent);
+	memcpy(dest->c + dest->len, str, len);
+	dest->len = new_len;
+}
+#define smart_string_appendl(str, src, len) smart_string_appendl_ex((str), (src), (len), 0)
+
+#define smart_string_appends_ex(str, src, what) \
+	smart_string_appendl_ex((str), (src), strlen(src), (what))
+#define smart_string_appends(str, src) \
+	smart_string_appendl((str), (src), strlen(src))
+
+#define smart_string_append_ex(str, src, what) \
+	smart_string_appendl_ex((str), ((smart_string *)(src))->c, \
+		((smart_string *)(src))->len, (what));
+#define smart_string_append(str, src) \
+	smart_string_append_ex((str), (src), 0)
+
+static zend_always_inline void smart_string_append_long_ex(smart_string *dest, zend_long num, bool persistent) {
+	char buf[32];
+	char *result = zend_print_long_to_buf(buf + sizeof(buf) - 1, num);
+	smart_string_appendl_ex(dest, result, buf + sizeof(buf) - 1 - result, persistent);
+}
+#define smart_string_append_long(str, val) smart_string_append_long_ex((str), (val), 0)
+
+static zend_always_inline void smart_string_append_unsigned_ex(smart_string *dest, zend_ulong num, bool persistent) {
+	char buf[32];
+	char *result = zend_print_ulong_to_buf(buf + sizeof(buf) - 1, num);
+	smart_string_appendl_ex(dest, result, buf + sizeof(buf) - 1 - result, persistent);
+}
+#define smart_string_append_unsigned(str, val) smart_string_append_unsigned_ex((str), (val), 0)
+
+static zend_always_inline void smart_string_setl(smart_string *dest, char *src, size_t len) {
+	dest->len = len;
+	dest->a = len + 1;
+	dest->c = src;
+}
+#define smart_string_sets(str, src) smart_string_setl((str), (src), strlen(src))
+
+static zend_always_inline void smart_string_reset(smart_string *str) {
+	str->len = 0;
+}
 
 #endif
 SMART_STRING_SHIM
