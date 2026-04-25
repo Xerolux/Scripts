@@ -214,16 +214,17 @@ run_in_screen() {
   fi
 
   if screen_active "$sname"; then
-    local st; st="$(screen_state "$sname")"
-    local up; up="$(screen_uptime "$sname")"
     echo
-    draw_box "Session laeuft" "$Y" \
-      "Name:   $sname ($st)" \
-      "Uptime: ${up:---}" \
-      "" \
-      "$(_dim "screen -r $sname")  zum Anhaengen"
+    draw_box "Session laeuft bereits" "$Y" \
+      "Name:   $sname" \
+      "Status: $(screen_state "$sname")" \
+      "Uptime: $(screen_uptime "$sname")"
     echo
-    ask_confirm "Anhaengen?" && screen -r "$sname"
+    if ask_confirm "Anhaengen? (Strg+A D zum Trennen)"; then
+      clear
+      screen -r "$sname"
+      clear
+    fi
     return 0
   fi
 
@@ -288,19 +289,25 @@ menu_screens() {
   while true; do
     clear; draw_header "Screen Sessions"; echo
 
-    local items=() snames=() log_items=()
+    local -a items=() snames=() states=() log_items=()
+    local idx=0
     for entry in "${SCREEN_MAP[@]}"; do
       IFS=: read -r sn sc <<< "$entry"
       local label="${sn%_build}" line
       if screen_active "$sn"; then
-        local pid up st st_c
+        local pid up st
         pid="$(screen_pid "$sn")"
         up="$(screen_uptime "$sn")"
         st="$(screen_state "$sn")"
-        [ "$st" = "Detached" ] && st_c="$Y" || st_c="$G"
-        printf -v line "$(_ok "●")  %-10s  PID %s  %s  %s" "$label" "${pid:----}" "${up:----}" "$(_col "$st_c" "$st")"
+        if [ "$st" = "Detached" ]; then
+          line="$(_ok "●") $label  PID:${pid:--}  ${up:--}  $st"
+        else
+          line="$(_ok "●") $label  PID:${pid:--}  ${up:--}  $(_warn "$st")"
+        fi
+        states+=("active")
       else
-        printf -v line "$(_dim "○")  %-10s  $(_dim "---")" "$label"
+        line="$(_dim "○") $label  ---"
+        states+=("inactive")
       fi
       items+=("$line")
       snames+=("$sn")
@@ -341,28 +348,57 @@ menu_screens() {
           clear; _dim "=== $lp === (Strg+C = zurueck)"; tail -f "$lp"
         fi ;;
       *"Aktionen"*) continue ;;
-      *$(_ok "●")*)
-        local i=0 found=""
+      *)
+        local match_idx=-1
+        local i=0
         for item in "${items[@]}"; do
-          [ "$item" = "$choice" ] && found="${snames[$i]}" && break
+          if [ "$item" = "$choice" ]; then
+            match_idx=$i
+            break
+          fi
           i=$((i + 1))
         done
-        [ -n "$found" ] && screen_active "$found" && ask_confirm "'$found' anhaengen?" && screen -r "$found" ;;
-      *$(_dim "○")*)
-        local i=0 found=""
-        for item in "${items[@]}"; do
-          [ "$item" = "$choice" ] && found="${snames[$i]}" && break
-          i=$((i + 1))
-        done
-        if [ -n "$found" ]; then
-          _dim "'${found%_build}' nicht aktiv."
-          ask_confirm "Starten?" || continue
-          local sc=""
-          for entry in "${SCREEN_MAP[@]}"; do
-            IFS=: read -r sn s <<< "$entry"
-            [ "$sn" = "$found" ] && sc="$s" && break
-          done
-          [ -n "$sc" ] && run_build "$sc" "$found" package
+        [ "$match_idx" -lt 0 ] && continue
+
+        local found_sn="${snames[$match_idx]}"
+        local found_state="${states[$match_idx]}"
+        local found_label="${found_sn%_build}"
+
+        if [ "$found_state" = "active" ]; then
+          echo
+          draw_box "Session: $found_sn" "$G" \
+            "Status:  $(screen_state "$found_sn")" \
+            "Uptime:  $(screen_uptime "$found_sn")" \
+            "PID:     $(screen_pid "$found_sn")"
+          echo
+          local action
+          action=$(choose "" "Anhaengen (screen -r)" "Beenden (screen -X quit)" "Abbrechen") || continue
+          case "$action" in
+            "Anhaengen"*)
+              clear
+              screen -r "$found_sn"
+              clear ;;
+            "Beenden"*)
+              ask_confirm "'$found_sn' beenden?" || continue
+              screen -X -S "$found_sn" quit 2>/dev/null
+              _ok "$found_label beendet."
+              read -r -p " Enter..." _ ;;
+          esac
+        else
+          echo
+          draw_box "$found_label" "$GR" "Session nicht aktiv"
+          echo
+          local action
+          action=$(choose "" "Starten (Build)" "Abbrechen") || continue
+          case "$action" in
+            "Starten"*)
+              local sc=""
+              for entry in "${SCREEN_MAP[@]}"; do
+                IFS=: read -r sn s <<< "$entry"
+                [ "$sn" = "$found_sn" ] && sc="$s" && break
+              done
+              [ -n "$sc" ] && run_build "$sc" "$found_sn" package ;;
+          esac
         fi ;;
     esac
   done
