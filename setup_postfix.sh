@@ -69,7 +69,7 @@ MAP_CONFLICTS[pgsql]="postfix-pgsql"
 MAP_SONAME[ldap]="postfix-ldap.so"
 MAP_PKGNAME[ldap]="postfix-custom-ldap"
 MAP_DESC[ldap]="LDAP map support for Postfix"
-MAP_DEPS[ldap]="postfix-custom libldap-2.5-0"
+MAP_DEPS[ldap]="postfix-custom libldap-2.5-0|libldap-2.4-2"
 MAP_CONFLICTS[ldap]="postfix-ldap"
 
 # --- SQLite -------------------------------------------------------------------
@@ -585,6 +585,12 @@ create_deb_package() {
   arch="$(dpkg --print-architecture)"
   mkdir -p "$PACKAGE_DIR"
 
+  local deb_file="$PACKAGE_DIR/postfix-custom_${POSTFIX_VERSION}_${arch}.deb"
+  if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+    log "postfix-custom .deb bereits vorhanden – skip (FORCE_REBUILD=yes zum Erzwingen)"
+    return 0
+  fi
+
   cd "$BUILD_ROOT/postfix-${POSTFIX_VERSION}"
 
   log "Installiere Postfix ins Staging: $STAGE_POSTFIX"
@@ -648,6 +654,7 @@ create_deb_package() {
   if [ -f "${STAGE_POSTFIX}/etc/postfix/postfix.service" ]; then
     mkdir -p "${STAGE_POSTFIX}/lib/systemd/system"
     cp "${STAGE_POSTFIX}/etc/postfix/postfix.service" "${STAGE_POSTFIX}/lib/systemd/system/postfix.service"
+    rm -f "${STAGE_POSTFIX}/etc/postfix/postfix.service"
     log "Systemd-Unit nach /lib/systemd/system kopiert"
 
     # Hardening-Einstellungen in der [Service]-Sektion ergaenzen
@@ -657,7 +664,6 @@ create_deb_package() {
       log "Systemd-Unit: Hardening-Einstellungen hinzugefuegt"
     fi
 
-    # Original in /etc/postfix behalten (Postfix benoetigt ihn dort)
   fi
 
   # tmpfiles.d Konfiguration fuer Runtime-Verzeichnisse
@@ -743,7 +749,7 @@ fi
   fi
 
   # Create rsyslog config for postfix if missing
-  if [ ! -f /etc/rsyslog.d/postfix.conf ] && [ -d /etc/rsyslog.d ]; then
+  if [ ! -f /etc/rsyslog.d/postfix-custom.conf ] && [ -d /etc/rsyslog.d ]; then
     echo "mail.* -/var/log/mail.log" > /etc/rsyslog.d/postfix-custom.conf 2>/dev/null || true
   fi
 
@@ -759,6 +765,8 @@ POSTINST
 #!/bin/sh
 set -e
 
+command -v systemctl >/dev/null 2>&1 && systemctl stop postfix 2>/dev/null || true
+command -v systemctl >/dev/null 2>&1 && systemctl disable postfix 2>/dev/null || true
 command -v apt-mark >/dev/null 2>&1 && apt-mark unhold postfix-custom 2>/dev/null || true
 rm -f /etc/logrotate.d/postfix-custom
 ldconfig
@@ -766,7 +774,6 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
 POSTRM
   chmod 755 "$postrm"
 
-  local deb_file="$PACKAGE_DIR/postfix-custom_${POSTFIX_VERSION}_${arch}.deb"
   log "Erstelle $(basename "$deb_file")"
 
   # Map-.so aus Core-Staging entfernen – die kommen in eigene Pakete
@@ -805,7 +812,7 @@ POSTRM
     --description  "Postfix MTA $POSTFIX_VERSION – custom build (ISPConfig/SASL/TLS)" \
     --depends      "libssl3 | libssl3t64" \
     --depends      "libsasl2-2 | libsasl2-2t64" \
-    --depends      libicu74 \
+    --depends      "libicu74 | libicu72 | libicu75" \
     --conflicts    postfix \
     --provides     postfix \
     --replaces     postfix \
@@ -936,10 +943,15 @@ MAPPOSTRM
 
     local deb_file="$PACKAGE_DIR/${pkg_name}_${POSTFIX_VERSION}_${arch}.deb"
 
+    if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+      log "  [SKIP] $pkg_name – .deb bereits vorhanden (FORCE_REBUILD=yes zum Erzwingen)"
+      continue
+    fi
+
     local fpm_deps=""
     local dep
     for dep in $deps; do
-      fpm_deps="$fpm_deps --depends $dep"
+      fpm_deps="$fpm_deps --depends \"$dep\""
     done
 
     set +e
@@ -1013,6 +1025,11 @@ create_dev_package() {
   fi
 
   local deb_file="$PACKAGE_DIR/postfix-custom-dev_${POSTFIX_VERSION}_${arch}.deb"
+  if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+    log "postfix-custom-dev .deb bereits vorhanden – skip (FORCE_REBUILD=yes zum Erzwingen)"
+    rm -rf "$dev_stage"
+    return 0
+  fi
   log "Erstelle $(basename "$deb_file")"
 
   fpm \
@@ -1353,8 +1370,7 @@ check_os_arch() {
   arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
   if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
-    echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
-    exit 1
+    echo "WARNUNG: Dieses Skript ist für Ubuntu 24.04 (oder neuer) auf arm64 optimiert. Aktuell: ${os_id:-?} ${os_version_id:-?} ${arch:-?}." >&2
   fi
 
 }

@@ -730,6 +730,13 @@ create_deb_packages() {
   arch="$(dpkg --print-architecture)"
   mkdir -p "$PACKAGE_DIR"
 
+  local deb_core_check="$PACKAGE_DIR/dovecot-core-custom_${DOVECOT_VERSION}_${arch}.deb"
+  local deb_sieve_check="$PACKAGE_DIR/dovecot-pigeonhole-custom_${PIGEONHOLE_VERSION}_${arch}.deb"
+  if [ -f "$deb_core_check" ] && [ -f "$deb_sieve_check" ] && [ "${FORCE_REBUILD:-}" != "yes" ]; then
+    log "Beide .deb-Pakete bereits vorhanden – Ueberspringe Paket-Build. FORCE_REBUILD=yes zum Neu-Bau."
+    return 0
+  fi
+
   # ---- Post-Install / Post-Remove Scripts ------------------------------------
   local postinst="/tmp/dovecot-postinst.sh"
   local postrm="/tmp/dovecot-postrm.sh"
@@ -758,7 +765,7 @@ if [ ! -f /etc/dovecot/dovecot.conf ]; then
     mkdir -p /etc/dovecot/conf.d
     if [ -d /usr/share/dovecot/conf.d ]; then
       for f in /usr/share/dovecot/conf.d/*.conf; do
-        [ -f "$f" ] && cp -a "$f" /etc/dovecot/conf.d/ 2>/dev/null || true
+        [ -f "$f" ] && cp -an "$f" /etc/dovecot/conf.d/ 2>/dev/null || true
       done
     fi
   fi
@@ -801,10 +808,7 @@ ldconfig
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
-  command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom dovecot-pigeonhole-custom || true
-  for sp in "${DOVECOT_SUBPACKAGES[@]}"; do
-    command -v apt-mark >/dev/null 2>&1 && apt-mark hold "${SUB_PKGNAME[$sp]}" 2>/dev/null || true
-  done
+  command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom dovecot-pigeonhole-custom dovecot-custom-mysql dovecot-custom-pgsql dovecot-custom-sqlite dovecot-custom-ldap dovecot-custom-gssapi dovecot-custom-solr dovecot-custom-imapd dovecot-custom-pop3d dovecot-custom-lmtpd || true
 POSTINST
   chmod 755 "$postinst"
 
@@ -813,6 +817,10 @@ POSTINST
 set -e
 
 command -v apt-mark >/dev/null 2>&1 && apt-mark unhold dovecot-core-custom dovecot-pigeonhole-custom 2>/dev/null || true
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl stop dovecot 2>/dev/null || true
+  systemctl disable dovecot 2>/dev/null || true
+fi
 rm -f /etc/logrotate.d/dovecot-custom
 ldconfig
 if command -v systemctl >/dev/null 2>&1; then
@@ -1672,6 +1680,12 @@ package_dovecot() {
   arch="$(dpkg --print-architecture)"
   mkdir -p "$PACKAGE_DIR"
 
+  local deb_core_check="$PACKAGE_DIR/dovecot-core-custom_${DOVECOT_VERSION}_${arch}.deb"
+  if [ -f "$deb_core_check" ] && [ "${FORCE_REBUILD:-}" != "yes" ]; then
+    log "$(basename "$deb_core_check") bereits vorhanden – Ueberspringe. FORCE_REBUILD=yes zum Neu-Bau."
+    return 0
+  fi
+
   log "Erzeuge Staging für dovecot-core-custom.deb"
   rm -rf "$STAGE_DOVECOT"
   cd "$BUILD_ROOT/core"
@@ -1734,7 +1748,7 @@ if [ ! -f /etc/dovecot/dovecot.conf ]; then
     mkdir -p /etc/dovecot/conf.d
     if [ -d /usr/share/dovecot/conf.d ]; then
       for f in /usr/share/dovecot/conf.d/*.conf; do
-        [ -f "$f" ] && cp -a "$f" /etc/dovecot/conf.d/ 2>/dev/null || true
+        [ -f "$f" ] && cp -an "$f" /etc/dovecot/conf.d/ 2>/dev/null || true
       done
     fi
   fi
@@ -1769,6 +1783,10 @@ POSTINST
 set -e
 
 command -v apt-mark >/dev/null 2>&1 && apt-mark unhold dovecot-core-custom 2>/dev/null || true
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl stop dovecot 2>/dev/null || true
+  systemctl disable dovecot 2>/dev/null || true
+fi
 ldconfig
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
@@ -1787,11 +1805,18 @@ POSTRM
     --maintainer   "local build <root@localhost>" \
     --description  "Dovecot IMAP/POP3 $DOVECOT_VERSION – custom build (ISPConfig/MariaDB/Sieve)" \
     --depends      libssl3 \
-    --depends      libmariadb3 \
     --depends      libpam0g \
     --depends      libicu74 \
     --depends      libsodium23 \
     --depends      "liblua5.4-0 | liblua5.3-0" \
+    --depends      libsasl2-2 \
+    --depends      "libexttextcat-2.0-0 | libexttextcat2t64" \
+    --depends      "libunwind8 | libunwind8t64" \
+    --depends      "libzstd1 | libzstd1t64" \
+    --depends      "liblz4-1 | liblz4-1t64" \
+    --depends      libbz2-1.0 \
+    --depends      liblzma5 \
+    --depends      "libcap2 | libcap2t64" \
     --conflicts    dovecot-core \
     --provides     dovecot-core \
     --replaces     dovecot-core \
@@ -1892,6 +1917,12 @@ package_pigeonhole() {
   local arch
   arch="$(dpkg --print-architecture)"
   mkdir -p "$PACKAGE_DIR"
+
+  local deb_sieve_check="$PACKAGE_DIR/dovecot-pigeonhole-custom_${PIGEONHOLE_VERSION}_${arch}.deb"
+  if [ -f "$deb_sieve_check" ] && [ "${FORCE_REBUILD:-}" != "yes" ]; then
+    log "$(basename "$deb_sieve_check") bereits vorhanden – Ueberspringe. FORCE_REBUILD=yes zum Neu-Bau."
+    return 0
+  fi
 
   log "Prüfe Pigeonhole-Staging"
   [ -d "$STAGE_PIGEONHOLE" ] || die "Pigeonhole-Staging fehlt nach build_pigeonhole"
@@ -2151,8 +2182,8 @@ check_os_arch() {
   arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
   if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
-    echo "FEHLER: Dieses Skript unterstützt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
-    exit 1
+    echo "WARNUNG: Dieses Skript ist fuer Ubuntu 24.04 (oder neuer) auf arm64 optimiert." >&2
+    echo "         Aktuelle Plattform: $os_id $os_version_id $arch – fortgesetzt auf eigene Gefahr." >&2
   fi
 
 }

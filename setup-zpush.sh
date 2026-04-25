@@ -217,7 +217,7 @@ bootstrap_imap_conf() {
   mkdir -p "/etc/z-push"
   for src in "${src_candidates[@]}"; do
     if [[ -f "$src" ]]; then
-      cp -a "$src" "/etc/z-push/imap.conf.php"
+      cp -an "$src" "/etc/z-push/imap.conf.php"
       return 0
     fi
   done
@@ -253,16 +253,16 @@ fi
 log "Z-Push Hauptconfig: ${MAIN_ZPUSH_CONF}"
 log "IMAP Config: ${IMAP_CONF}"
 
-sed -i -E "s|^.*BACKEND_PROVIDER.*$|define('BACKEND_PROVIDER', 'BackendIMAP');|g" "${MAIN_ZPUSH_CONF}"
+sed -i.bak -E "s|^.*BACKEND_PROVIDER.*$|define('BACKEND_PROVIDER', 'BackendIMAP');|g" "${MAIN_ZPUSH_CONF}"
 
-sed -i -E "s|^[[:space:]]*define\\('IMAP_SERVER'.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" "${IMAP_CONF}"
-sed -i -E "s|^[[:space:]]*define\\('IMAP_PORT'.*|define('IMAP_PORT', 993);|g" "${IMAP_CONF}"
-sed -i -E "s|^[[:space:]]*define\\('IMAP_OPTIONS'.*|define('IMAP_OPTIONS', '/ssl');|g" "${IMAP_CONF}"
+sed -i.bak -E "s|^[[:space:]]*define\\('IMAP_SERVER'.*|define('IMAP_SERVER', '${MAIL_HOST}');|g" "${IMAP_CONF}"
+sed -i.bak -E "s|^[[:space:]]*define\\('IMAP_PORT'.*|define('IMAP_PORT', 993);|g" "${IMAP_CONF}"
+sed -i.bak -E "s|^[[:space:]]*define\\('IMAP_OPTIONS'.*|define('IMAP_OPTIONS', '/ssl');|g" "${IMAP_CONF}"
 
-sed -i -E "s|^[[:space:]]*define\\('IMAP_SENTFOLDER'.*|define('IMAP_SENTFOLDER', '${SENT}');|g" "${IMAP_CONF}"
-sed -i -E "s|^[[:space:]]*define\\('IMAP_DRAFTSFOLDER'.*|define('IMAP_DRAFTSFOLDER', '${DRAFTS}');|g" "${IMAP_CONF}"
-sed -i -E "s|^[[:space:]]*define\\('IMAP_TRASHFOLDER'.*|define('IMAP_TRASHFOLDER', '${TRASH}');|g" "${IMAP_CONF}"
-sed -i -E "s|^[[:space:]]*define\\('IMAP_SPAMFOLDER'.*|define('IMAP_SPAMFOLDER', '${SPAM}');|g" "${IMAP_CONF}"
+sed -i.bak -E "s|^[[:space:]]*define\\('IMAP_SENTFOLDER'.*|define('IMAP_SENTFOLDER', '${SENT}');|g" "${IMAP_CONF}"
+sed -i.bak -E "s|^[[:space:]]*define\\('IMAP_DRAFTSFOLDER'.*|define('IMAP_DRAFTSFOLDER', '${DRAFTS}');|g" "${IMAP_CONF}"
+sed -i.bak -E "s|^[[:space:]]*define\\('IMAP_TRASHFOLDER'.*|define('IMAP_TRASHFOLDER', '${TRASH}');|g" "${IMAP_CONF}"
+sed -i.bak -E "s|^[[:space:]]*define\\('IMAP_SPAMFOLDER'.*|define('IMAP_SPAMFOLDER', '${SPAM}');|g" "${IMAP_CONF}"
 
 php -l "${MAIN_ZPUSH_CONF}" >/dev/null || fail "Z-Push Hauptconfig hat Syntaxfehler: ${MAIN_ZPUSH_CONF}"
 php -l "${IMAP_CONF}" >/dev/null || fail "Z-Push IMAP Config hat Syntaxfehler: ${IMAP_CONF}"
@@ -312,6 +312,7 @@ EOF
 
 TARGET_CONF="${NGINX_AVAILABLE}/${PUSH_DOMAIN}.conf"
 
+cp "${TARGET_CONF}" "${TARGET_CONF}.bak" 2>/dev/null || true
 cp "$TMP_CONF" "$TARGET_CONF"
 ln -sfn "$TARGET_CONF" "${NGINX_ENABLED}/"
 

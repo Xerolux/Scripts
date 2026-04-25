@@ -46,6 +46,9 @@ Verwendung:
   setup_backup_restore.sh restore-nginx [dir]       – Nur Nginx wiederherstellen
   setup_backup_restore.sh list                      – Verfuegbare Backups auflisten
   setup_backup_restore.sh verify <backup-dir>       – Backup-Integritaet pruefen
+
+Optionen:
+  --force    Restore ohne Bestaetigung (fuer nicht-interaktive Ausfuehrung)
 EOF
 }
 
@@ -172,7 +175,8 @@ backup_deb_cache() {
     done < "$pkg_list"
   fi
 
-  for pkg_dir in "$POSTFIX_PKG_DIR" "$DOVECOT_PKG_DIR" "$NGINX_PKG_DIR"; do
+  local php_pkg_dir="${PHP_PKG_DIR:-/root/php-packages}"
+  for pkg_dir in "$POSTFIX_PKG_DIR" "$DOVECOT_PKG_DIR" "$NGINX_PKG_DIR" "$php_pkg_dir"; do
     if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
       cp -a "$pkg_dir"/*.deb "$dest/apt-cache/" 2>/dev/null || true
     fi
@@ -240,6 +244,7 @@ restore_postfix() {
   [ -d "$src/postfix" ] || die "Kein Postfix-Backup in $src gefunden"
 
   log "  Stelle Postfix wieder her..."
+  log "  WARNUNG: Ueberschreibe /etc/postfix, /usr/lib/postfix, etc."
   [ -d "$src/postfix/etc_postfix" ]     && cp -a "$src/postfix/etc_postfix"     /etc/postfix
   [ -d "$src/postfix/usr_lib_postfix" ] && cp -a "$src/postfix/usr_lib_postfix" /usr/lib/postfix
   [ -f "$src/postfix/postfix.service" ] && cp -a "$src/postfix/postfix.service" /lib/systemd/system/postfix.service
@@ -255,6 +260,7 @@ restore_dovecot() {
   [ -d "$src/dovecot" ] || die "Kein Dovecot-Backup in $src gefunden"
 
   log "  Stelle Dovecot wieder her..."
+  log "  WARNUNG: Ueberschreibe /etc/dovecot, /usr/lib/dovecot, etc."
   [ -d "$src/dovecot/etc_dovecot" ]           && cp -a "$src/dovecot/etc_dovecot"           /etc/dovecot
   [ -d "$src/dovecot/usr_lib_dovecot" ]       && cp -a "$src/dovecot/usr_lib_dovecot"       /usr/lib/dovecot
   [ -f "$src/dovecot/dovecot.service" ]       && cp -a "$src/dovecot/dovecot.service"       /lib/systemd/system/dovecot.service
@@ -270,6 +276,7 @@ restore_nginx() {
   [ -d "$src/nginx" ] || die "Kein Nginx-Backup in $src gefunden"
 
   log "  Stelle Nginx wieder her..."
+  log "  WARNUNG: Ueberschreibe /etc/nginx, /usr/lib/nginx, etc."
   [ -d "$src/nginx/etc_nginx" ]         && cp -a "$src/nginx/etc_nginx"         /etc/nginx
   [ -d "$src/nginx/usr_lib_nginx" ]     && cp -a "$src/nginx/usr_lib_nginx"     /usr/lib/nginx
   [ -f "$src/nginx/nginx.service" ]     && cp -a "$src/nginx/nginx.service"     /lib/systemd/system/nginx.service
@@ -284,13 +291,20 @@ restore_system() {
   [ -d "$src/system" ] || return 0
 
   log "  Stelle System-Daten wieder her..."
-  [ -f "$src/system/resolv.conf" ]  && cp -a "$src/system/resolv.conf"  /etc/resolv.conf
+  if [ -f "$src/system/resolv.conf" ]; then
+    if [ -L /etc/resolv.conf ]; then
+      log "  WARNUNG: /etc/resolv.conf ist ein Symlink (systemd-resolved) – ueberspringe Restore"
+    else
+      cp -a "$src/system/resolv.conf" /etc/resolv.conf
+    fi
+  fi
   [ -f "$src/system/hosts" ]        && cp -a "$src/system/hosts"        /etc/hosts
   [ -f "$src/system/hostname" ]     && cp -a "$src/system/hostname"     /etc/hostname
   [ -f "$src/system/mailname" ]     && cp -a "$src/system/mailname"     /etc/mailname
 
   if [ -d "$src/system/etc_ssl" ]; then
-    cp -a "$src/system/etc_ssl" /etc/ssl 2>/dev/null || true
+    log "  WARNUNG: Ueberschreibe /etc/ssl NICHT – merge nur neue Dateien (no-clobber)"
+    cp -an "$src/system/etc_ssl/." /etc/ssl/ 2>/dev/null || true
   fi
 
   if [ -d "$src/system/letsencrypt" ]; then
@@ -326,7 +340,9 @@ restore_deb_cache() {
   log "  Installiere $deb_count Pakete aus Cache..."
 
   if [ "$deb_count" -gt 0 ]; then
+    log "  WARNUNG: Installiere $deb_count .deb-Pakete – bestehende Versionen werden ueberschrieben!"
     dpkg -i "$src/apt-cache/"*.deb 2>/dev/null || true
+    apt-get install -f -y 2>/dev/null || true
   fi
 }
 
@@ -477,20 +493,45 @@ verify_backup() {
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
+RESTORE_FORCE=0
+
+# Prueft ob --force gesetzt ist, sonst Warnung ausgeben
+check_restore_confirm() {
+  if [ "$RESTORE_FORCE" -eq 0 ]; then
+    log "WARNUNG: Restore laeuft ohne --force. Konfigurationen werden ueberschrieben!"
+    log "  (Mit --force unterdruecken Sie diese Warnung fuer nicht-interactive Nutzung.)"
+  fi
+}
+
+# Filtert --force aus den Argumenten und setzt RESTORE_FORCE
+parse_force_flag() {
+  local args=()
+  for arg in "$@"; do
+    if [ "$arg" = "--force" ]; then
+      RESTORE_FORCE=1
+    else
+      args+=("$arg")
+    fi
+  done
+  echo "${args[@]}"
+}
+
 main() {
   require_root
   mkdir -p "$BACKUP_ROOT"
   touch "$LOG_FILE" || die "Kann Log-Datei nicht erstellen: $LOG_FILE"
+
+  set -- $(parse_force_flag "$@")
 
   case "${1:-help}" in
     backup)           do_full_backup ;;
     backup-postfix)   do_single_backup postfix ;;
     backup-dovecot)   do_single_backup dovecot ;;
     backup-nginx)     do_single_backup nginx ;;
-    restore)          do_full_restore "${2:-}" ;;
-    restore-postfix)  do_single_restore postfix "${2:-}" ;;
-    restore-dovecot)  do_single_restore dovecot "${2:-}" ;;
-    restore-nginx)    do_single_restore nginx "${2:-}" ;;
+    restore)          check_restore_confirm; do_full_restore "${2:-}" ;;
+    restore-postfix)  check_restore_confirm; do_single_restore postfix "${2:-}" ;;
+    restore-dovecot)  check_restore_confirm; do_single_restore dovecot "${2:-}" ;;
+    restore-nginx)    check_restore_confirm; do_single_restore nginx "${2:-}" ;;
     list)             list_backups ;;
     verify)           verify_backup "${2:-}" ;;
     help|-h|--help)   usage ;;

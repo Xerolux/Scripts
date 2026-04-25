@@ -1413,10 +1413,18 @@ mkdir -p /etc/php/${PHP_VER_SHORT}/cli/conf.d
 mkdir -p /etc/php/${PHP_VER_SHORT}/mods-available
 mkdir -p $PHP_MODS_AVAIL
 
-# Copy default php.ini on fresh install
-if [ ! -f "/etc/php/${PHP_VER_SHORT}/cli/php.ini" ] && [ -f "/usr/share/php/${PHP_VER_SHORT}/custom-defaults/php.ini" ]; then
+  # Copy default php.ini on fresh install
+  # Primary location: /etc/php/{ver}/php.ini (compile-time --with-config-file-path)
+  # SAPI-specific: /etc/php/{ver}/{cli,fpm}/php.ini (for tool compatibility)
+  if [ ! -f "/etc/php/${PHP_VER_SHORT}/php.ini" ] && [ -f "/usr/share/php/${PHP_VER_SHORT}/custom-defaults/php.ini" ]; then
   echo "INFO: Keine php.ini gefunden – installiere Production-Defaults"
-  cp "/usr/share/php/${PHP_VER_SHORT}/custom-defaults/php.ini" "/etc/php/${PHP_VER_SHORT}/cli/php.ini"
+  cp "/usr/share/php/${PHP_VER_SHORT}/custom-defaults/php.ini" "/etc/php/${PHP_VER_SHORT}/php.ini"
+fi
+if [ ! -f "/etc/php/${PHP_VER_SHORT}/cli/php.ini" ] && [ -f "/etc/php/${PHP_VER_SHORT}/php.ini" ]; then
+  cp "/etc/php/${PHP_VER_SHORT}/php.ini" "/etc/php/${PHP_VER_SHORT}/cli/php.ini"
+fi
+if [ ! -f "/etc/php/${PHP_VER_SHORT}/fpm/php.ini" ] && [ -f "/etc/php/${PHP_VER_SHORT}/php.ini" ]; then
+  cp "/etc/php/${PHP_VER_SHORT}/php.ini" "/etc/php/${PHP_VER_SHORT}/fpm/php.ini"
 fi
 if [ ! -f "/etc/php/${PHP_VER_SHORT}/fpm/php.ini" ] && [ -f "/usr/share/php/${PHP_VER_SHORT}/custom-defaults/php.ini" ]; then
   cp "/usr/share/php/${PHP_VER_SHORT}/custom-defaults/php.ini" "/etc/php/${PHP_VER_SHORT}/fpm/php.ini"
@@ -1447,13 +1455,26 @@ set -e
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
 command -v systemctl >/dev/null 2>&1 && systemctl enable php${PHP_VER_SHORT}-fpm 2>/dev/null || true
 
-# Copy default FPM configs on fresh install
+# Copy default FPM configs on fresh install (each file checked individually)
 FPM_SHARE="/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm"
 FPM_ETC="/etc/php/${PHP_VER_SHORT}/fpm"
-if [ ! -f "\${FPM_ETC}/php-fpm.conf" ] && [ -d "\$FPM_SHARE" ]; then
-  echo "INFO: Keine FPM-Konfiguration gefunden – installiere Defaults"
-  cp "\$FPM_SHARE/php-fpm.conf" "\${FPM_ETC}/php-fpm.conf"
-  cp "\$FPM_SHARE/pool.d/www.conf" "\${FPM_ETC}/pool.d/www.conf"
+if [ -d "\$FPM_SHARE" ]; then
+  if [ ! -f "\${FPM_ETC}/php-fpm.conf" ]; then
+    echo "INFO: Keine php-fpm.conf gefunden – installiere Default"
+    cp "\$FPM_SHARE/php-fpm.conf" "\${FPM_ETC}/php-fpm.conf"
+  fi
+  if [ ! -f "\${FPM_ETC}/pool.d/www.conf" ]; then
+    echo "INFO: Keine www.conf gefunden – installiere Default"
+    cp "\$FPM_SHARE/pool.d/www.conf" "\${FPM_ETC}/pool.d/www.conf"
+  fi
+fi
+
+# Restart FPM on upgrade (if service was running)
+if [ "\$1" = "configure" ] && [ -n "\$2" ]; then
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet php${PHP_VER_SHORT}-fpm 2>/dev/null; then
+    echo "INFO: Upgrade erkannt – starte php${PHP_VER_SHORT}-fpm neu"
+    systemctl restart php${PHP_VER_SHORT}-fpm 2>/dev/null || true
+  fi
 fi
 FPMPINST
   chmod 755 "$fpm_postinst"
@@ -1462,6 +1483,7 @@ FPMPINST
 #!/bin/sh
 set -e
 command -v systemctl >/dev/null 2>&1 && systemctl stop php${PHP_VER_SHORT}-fpm 2>/dev/null || true
+command -v systemctl >/dev/null 2>&1 && systemctl disable php${PHP_VER_SHORT}-fpm 2>/dev/null || true
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
 FPMPOSTRM
   chmod 755 "$fpm_postrm"
@@ -1557,9 +1579,14 @@ create_core_package() {
   arch="$(dpkg --print-architecture)"
   mkdir -p "$PACKAGE_DIR"
 
+  local deb_file="$PACKAGE_DIR/php${PHP_VER_SHORT}-custom_${PHP_VERSION}-1_${arch}.deb"
+  if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+    log "Core-Paket bereits vorhanden – ueberspringe ($(basename "$deb_file"))"
+    return 0
+  fi
+
   create_maintainer_scripts
 
-  local deb_file="$PACKAGE_DIR/php${PHP_VER_SHORT}-custom_${PHP_VERSION}-1_${arch}.deb"
   log "Erstelle $(basename "$deb_file")"
 
   # Copy php.ini reference files
@@ -1584,6 +1611,7 @@ set -e
 MODNAME="$1"
 VER="PHP_VER_PLACEHOLDER"
 MODSAVAIL="/usr/share/php/${VER}/mods-available"
+SCAN_DIR="/etc/php/${VER}/mods-available"
 if [ -z "$MODNAME" ]; then
   echo "Usage: php${VER}-enmod <module>" >&2
   exit 1
@@ -1592,12 +1620,8 @@ if [ ! -f "${MODSAVAIL}/${MODNAME}.ini" ]; then
   echo "WARNING: Module ${MODNAME} not found in ${MODSAVAIL}" >&2
   exit 0
 fi
-for sapi in fpm cli; do
-  CONFD="/etc/php/${VER}/${sapi}/conf.d"
-  mkdir -p "$CONFD"
-  PRIORITY=$(echo "${MODNAME}" | tr '[:upper:]' '[:lower:]' | cksum | cut -d' ' -f1 | tail -c 3)
-  ln -sf "${MODSAVAIL}/${MODNAME}.ini" "${CONFD}/$(printf '%02d' $((10#$PRIORITY)))-${MODNAME}.ini" 2>/dev/null || true
-done
+mkdir -p "$SCAN_DIR"
+ln -sf "${MODSAVAIL}/${MODNAME}.ini" "${SCAN_DIR}/${MODNAME}.ini" 2>/dev/null || true
 ENMOD
   sed -i "s/PHP_VER_PLACEHOLDER/${PHP_VER_SHORT}/g" "${STAGE_PHP}/usr/sbin/php${PHP_VER_SHORT}-enmod"
   chmod 755 "${STAGE_PHP}/usr/sbin/php${PHP_VER_SHORT}-enmod"
@@ -1607,14 +1631,12 @@ ENMOD
 set -e
 MODNAME="$1"
 VER="PHP_VER_PLACEHOLDER"
+SCAN_DIR="/etc/php/${VER}/mods-available"
 if [ -z "$MODNAME" ]; then
   echo "Usage: php${VER}-dismod <module>" >&2
   exit 1
 fi
-for sapi in fpm cli; do
-  CONFD="/etc/php/${VER}/${sapi}/conf.d"
-  rm -f "${CONFD}/"*"-${MODNAME}.ini" 2>/dev/null || true
-done
+rm -f "${SCAN_DIR}/${MODNAME}.ini" 2>/dev/null || true
 DISMOD
   sed -i "s/PHP_VER_PLACEHOLDER/${PHP_VER_SHORT}/g" "${STAGE_PHP}/usr/sbin/php${PHP_VER_SHORT}-dismod"
   chmod 755 "${STAGE_PHP}/usr/sbin/php${PHP_VER_SHORT}-dismod"
@@ -1653,16 +1675,16 @@ DISMOD
     --depends      libcurl4 \
     --depends      libxml2 \
     --depends      libgd3 \
-    --depends      libzip4 \
+    --depends      "libzip4t64 | libzip4" \
     --depends      libsodium23 \
-    --depends      libicu74 \
+    --depends      "libicu74 | libicu72 | libicu75 | libicu76" \
     --depends      libonig5 \
     --depends      libffi8 \
     --depends      libpq5 \
     --depends      libmariadb3 \
     --depends      libsqlite3-0 \
     --depends      libgmp10 \
-    --depends      libldap-2.5-0 \
+    --depends      "libldap-2.5-0 | libldap-2.4-2" \
     --depends      libxslt1.1 \
     --depends      libenchant-2-2 \
     --depends      libtidy5deb1 \
@@ -1708,6 +1730,12 @@ create_fpm_package() {
   local arch
   arch="$(dpkg --print-architecture)"
 
+  local deb_file="$PACKAGE_DIR/php${PHP_VER_SHORT}-fpm-custom_${PHP_VERSION}-1_${arch}.deb"
+  if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+    log "FPM-Paket bereits vorhanden – ueberspringe ($(basename "$deb_file"))"
+    return 0
+  fi
+
   local fpm_stage="/tmp/php-fpm-stage"
   rm -rf "$fpm_stage"
   mkdir -p "$fpm_stage/usr/sbin"
@@ -1745,13 +1773,13 @@ LimitCORE=infinity
 WantedBy=multi-user.target
 FPMUNIT
 
-  cat > "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/fpm/pool.d.example.conf" <<'FPMPOOL'
+  cat > "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/fpm/pool.d.example.conf" <<FPMPOOL
 ; Example FPM pool configuration
-; Copy to /etc/php/8.5/fpm/pool.d/www.conf
+; Copy to /etc/php/${PHP_VER_SHORT}/fpm/pool.d/www.conf
 [www]
 user = www-data
 group = www-data
-listen = /run/php/php8.5-fpm.sock
+listen = /run/php/php${PHP_VER_SHORT}-fpm.sock
 listen.owner = www-data
 listen.group = www-data
 pm = dynamic
@@ -1788,22 +1816,22 @@ EOF
   mkdir -p "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm"
   mkdir -p "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm/pool.d"
 
-  cat > "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm/php-fpm.conf" <<'FPMCONF'
+  cat > "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm/php-fpm.conf" <<FPMCONF
 ;;;;;;;;;;;;;;;;;;;;;
 ; FPM Configuration ;
 ;;;;;;;;;;;;;;;;;;;;;
 
 [global]
-pid = /run/php/php8.5-fpm.pid
-error_log = /var/log/php8.5-fpm.log
-include=/etc/php/8.5/fpm/pool.d/*.conf
+pid = /run/php/php${PHP_VER_SHORT}-fpm.pid
+error_log = /var/log/php${PHP_VER_SHORT}-fpm.log
+include=/etc/php/${PHP_VER_SHORT}/fpm/pool.d/*.conf
 FPMCONF
 
-  cat > "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm/pool.d/www.conf" <<'POOLCONF'
+  cat > "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm/pool.d/www.conf" <<POOLCONF
 [www]
 user = www-data
 group = www-data
-listen = /run/php/php8.5-fpm.sock
+listen = /run/php/php${PHP_VER_SHORT}-fpm.sock
 listen.owner = www-data
 listen.group = www-data
 pm = dynamic
@@ -2293,6 +2321,12 @@ create_php_dev_package() {
   local arch
   arch="$(dpkg --print-architecture)"
 
+  local deb_file="$PACKAGE_DIR/php${PHP_VER_SHORT}-custom-dev_${PHP_VERSION}-1_${arch}.deb"
+  if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+    log "Dev-Paket bereits vorhanden – ueberspringe"
+    return 0
+  fi
+
   local dev_stage="/tmp/php-dev-stage"
   rm -rf "$dev_stage"
   mkdir -p "$dev_stage"
@@ -2396,9 +2430,12 @@ check_os_arch() {
   os_major_version=$(echo "$os_version_id" | cut -d. -f1)
   arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
-  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
-    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
+  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ]; then
+    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer)." >&2
     exit 1
+  fi
+  if [ "$arch" != "arm64" ]; then
+    echo "WARNUNG: Skript ist fuer arm64 optimiert. Architektur: $arch – fahre fort." >&2
   fi
 }
 

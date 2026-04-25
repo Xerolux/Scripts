@@ -59,9 +59,13 @@ check_os_arch() {
   os_major_version=$(echo "$os_version_id" | cut -d. -f1)
   arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
-  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
-    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
+  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ]; then
+    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer)." >&2
     exit 1
+  fi
+
+  if [ "$arch" != "arm64" ]; then
+    echo "WARNUNG: Dieses Skript ist fuer arm64 ausgelegt. Aktuelle Architektur: $arch." >&2
   fi
 }
 
@@ -334,6 +338,8 @@ rebuild_repo() {
 update_apt_sources() {
   local list_file="/etc/apt/sources.list.d/local-mail-repo.list"
 
+  if [ -f "$list_file" ]; then cp "$list_file" "${list_file}.bak"; fi
+
   if [ -f "$GPG_PUBLIC_KEY" ] && detect_gpg_key 2>/dev/null; then
     echo "deb [signed-by=$GPG_PUBLIC_KEY] file:$REPO_DIR ./" > "$list_file"
     log "apt sources list aktualisiert (signed-by=$GPG_PUBLIC_KEY)"
@@ -392,7 +398,7 @@ update_repo() {
   log "Kopiere neue Pakete..."
   for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR" "$PHP_PKG_DIR"; do
     if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
-      cp -u "$pkg_dir"/*.deb "$REPO_DIR/" 2>/dev/null || true
+      cp -a "$pkg_dir"/*.deb "$REPO_DIR/" 2>/dev/null || true
     fi
   done
 

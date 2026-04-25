@@ -252,7 +252,7 @@ MOD_PKGNAME[http-perl]="libnginx-mod-http-perl"
 MOD_SOFILES[http-perl]="ngx_http_perl_module.so"
 MOD_DESC[http-perl]="Embedded Perl interpreter"
 MOD_LOADCONF[http-perl]="mod-http-perl"
-MOD_EXTRADEPS[http-perl]="nginx-custom libperl5.38"
+  MOD_EXTRADEPS[http-perl]="nginx-custom libperl5.38 | libperl5.40 | libperl5.36"
 MOD_NEEDS_SUBMODULE[http-perl]="no"
 
 # Module in Build-Reihenfolge (ndk VOR lua, da lua von ndk abhaengt)
@@ -603,7 +603,7 @@ build_configure_args() {
   CONF_ARGS="$CONF_ARGS --conf-path=/etc/nginx/nginx.conf"
   CONF_ARGS="$CONF_ARGS --error-log-path=/var/log/nginx/error.log"
   CONF_ARGS="$CONF_ARGS --http-log-path=/var/log/nginx/access.log"
-  CONF_ARGS="$CONF_ARGS --pid-path=/var/run/nginx.pid"
+  CONF_ARGS="$CONF_ARGS --pid-path=/run/nginx.pid"
   CONF_ARGS="$CONF_ARGS --lock-path=/var/run/nginx.lock"
   CONF_ARGS="$CONF_ARGS --user=$NGINX_USER"
   CONF_ARGS="$CONF_ARGS --group=$NGINX_GROUP"
@@ -891,10 +891,20 @@ mkdir -p /usr/share/nginx/modules-available
 if [ ! -f /etc/nginx/nginx.conf ]; then
   echo "INFO: Keine nginx.conf gefunden – installiere Default-Konfiguration"
   mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/snippets /etc/nginx/conf.d
+fi
+
+# Einzelne Default-Configs nur installieren wenn sie noch nicht existieren
+if [ ! -f /etc/nginx/nginx.conf ]; then
   cp -a /usr/share/nginx/custom-defaults/nginx.conf /etc/nginx/nginx.conf
+fi
+if [ ! -f /etc/nginx/sites-available/default ]; then
   cp -a /usr/share/nginx/custom-defaults/sites-available/default /etc/nginx/sites-available/default
   ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+fi
+if [ ! -f /etc/nginx/snippets/fastcgi-php.conf ]; then
   cp -a /usr/share/nginx/custom-defaults/snippets/fastcgi-php.conf /etc/nginx/snippets/fastcgi-php.conf
+fi
+if [ ! -d /var/www/html ]; then
   mkdir -p /var/www/html
   echo "<!DOCTYPE html><html><head><title>Welcome</title></head><body><h1>nginx is running (custom build)</h1></body></html>" > /var/www/html/index.html
 fi
@@ -908,6 +918,9 @@ POSTINST
   cat > "$postrm" <<'POSTRM'
 #!/bin/sh
 set -e
+
+command -v systemctl >/dev/null 2>&1 && systemctl stop nginx 2>/dev/null || true
+command -v systemctl >/dev/null 2>&1 && systemctl disable nginx 2>/dev/null || true
 
 command -v apt-mark >/dev/null 2>&1 && apt-mark unhold nginx-custom 2>/dev/null || true
 rm -f /etc/logrotate.d/nginx-custom
@@ -1010,6 +1023,12 @@ create_core_package() {
   arch="$(dpkg --print-architecture)"
   mkdir -p "$PACKAGE_DIR"
 
+  local deb_file="$PACKAGE_DIR/nginx-custom_${NGINX_VERSION}_${arch}.deb"
+  if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+    log "nginx-custom .deb bereits vorhanden – überspringe (FORCE_REBUILD=yes zum Erzwingen)"
+    return 0
+  fi
+
   mkdir -p "${STAGE_NGINX}/var/log/nginx"
   mkdir -p "${STAGE_NGINX}/var/cache/nginx"
   mkdir -p "${STAGE_NGINX}/usr/share/nginx/modules-available"
@@ -1024,7 +1043,7 @@ Wants=network-online.target
 
 [Service]
 Type=forking
-PIDFile=/var/run/nginx.pid
+PIDFile=/run/nginx.pid
 ExecStartPre=/usr/sbin/nginx -t -q -g 'daemon on; master_process on;'
 ExecStart=/usr/sbin/nginx -g 'daemon on; master_process on;'
 ExecReload=/usr/sbin/nginx -g 'daemon on; master_process on;' -s reload
@@ -1054,7 +1073,7 @@ NGXSRV
     create 0640 www-data adm
     sharedscripts
     postrotate
-        [ -f /var/run/nginx.pid ] && kill -USR1 $(cat /var/run/nginx.pid) || true
+        [ -f /run/nginx.pid ] && kill -USR1 $(cat /run/nginx.pid) || true
     endspost
 }
 NGXLR
@@ -1137,6 +1156,7 @@ DEFAULTSITE
 
   cat > "${STAGE_NGINX}/usr/share/nginx/custom-defaults/snippets/fastcgi-php.conf" <<'FASTCGI'
 fastcgi_split_path_info ^(.+\.php)(/.+)$;
+# Socket entspricht dem Custom-PHP-Build (setup_php.sh)
 fastcgi_pass unix:/run/php/php8.5-fpm.sock;
 fastcgi_index index.php;
 include fastcgi_params;
@@ -1239,6 +1259,12 @@ create_module_packages() {
       continue
     fi
 
+    local deb_file="$PACKAGE_DIR/${pkg_name}_${NGINX_VERSION}_${arch}.deb"
+    if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -f "$deb_file" ]; then
+      log "  [SKIP] $pkg_name – .deb bereits vorhanden (FORCE_REBUILD=yes zum Erzwingen)"
+      continue
+    fi
+
     log "Erstelle Paket: $pkg_name"
 
     # Pruefen ob mindestens eine .so-Datei existiert
@@ -1298,8 +1324,6 @@ LUALOAD
     fi
 
     # fpm .deb erstellen
-    local deb_file="$PACKAGE_DIR/${pkg_name}_${NGINX_VERSION}_${arch}.deb"
-
     local fpm_deps=""
     local dep
     for dep in $extra_deps; do
@@ -1848,9 +1872,14 @@ check_os_arch() {
   os_major_version=$(echo "$os_version_id" | cut -d. -f1)
   arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
 
-  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] || [ "$arch" != "arm64" ]; then
-    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer) auf arm64." >&2
+  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ]; then
+    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer)." >&2
     exit 1
+  fi
+
+  if [ "$arch" != "arm64" ]; then
+    echo "WARNUNG: Dieses Skript ist fuer arm64 optimiert. Aktuelle Architektur: $arch" >&2
+    echo "         Fortsetzung auf eigene Gefahr." >&2
   fi
 }
 
