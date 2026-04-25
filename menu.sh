@@ -509,9 +509,25 @@ main_menu() {
   done
 }
 
+git_update_and_restart() {
+  if [ -d "$SCRIPT_DIR/.git" ]; then
+    local output
+    output="$(git -C "$SCRIPT_DIR" pull 2>&1)" || {
+      whiptail --title "Git Fehler" --msgbox "git pull fehlgeschlagen:\n\n$output" 12 70
+      return
+    }
+    if echo "$output" | grep -q "Already up to date\|Already up-to-date\|current"; then
+      return
+    fi
+    whiptail --title "Git Update" --msgbox "Repo wurde aktualisiert. Menue wird neu gestartet...\n\n$output" 12 70
+    exec bash "$0" "$@"
+  fi
+}
+
 main() {
   require_whiptail
   ensure_root "$@"
+  git_update_and_restart "$@"
   ensure_executable_scripts
   ensure_env_files
   main_menu

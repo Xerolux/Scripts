@@ -60,7 +60,7 @@ PHP_MODS_AVAIL="/usr/share/php/${PHP_VER_SHORT}/mods-available"
 # PECL_EXTNAME    – Name der .so Datei (ohne Pfad)
 # ------------------------------------------------------------------------------
 declare -A PECL_GITURL PECL_GITREF PECL_DIRNAME PECL_PKGNAME PECL_DESC \
-           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME PECL_SUBDIR PECL_CMAKE
+           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME PECL_SUBDIR PECL_CMAKE PECL_SUBMODULES
 
 # --- 1. OPcache --------------------------------------------------------------
 PECL_DIRNAME[opcache]="opcache"
@@ -495,6 +495,7 @@ PECL_EXTNAME[xlswriter]="xlswriter"
 PECL_ZEND[xlswriter]="no"
 PECL_DEPS[xlswriter]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[xlswriter]=""
+PECL_SUBMODULES[xlswriter]="yes"
 
 # --- 41. XMLRPC --------------------------------------------------------------
 PECL_DIRNAME[xmlrpc]="php-xmlrpc"
@@ -872,6 +873,15 @@ download_pecl_sources() {
     fi
 
     if [ -d "$target" ]; then
+      if [ "${PECL_SUBMODULES[$ext]:-}" = "yes" ] && [ -d "$target/.git" ]; then
+        local _sm_check="$target/library/libxlsxwriter/third_party/md5/md5.c"
+        if [ ! -f "$_sm_check" ] || [ ! -d "$target/library/libxlsxwriter/third_party" ]; then
+          log "  Initialisiere fehlende Submodules fuer $dir"
+          git -C "$target" submodule update --init --recursive --depth 1 2>&1 || {
+            log "  [WARN] Submodule-Init fuer $dir fehlgeschlagen – Build evtl. unvollstaendig"
+          }
+        fi
+      fi
       log "  [OK] $dir bereits vorhanden"
       continue
     fi
@@ -921,6 +931,14 @@ download_pecl_sources() {
       rm -rf "$target"
       continue
     fi
+
+    if [ "${PECL_SUBMODULES[$ext]:-}" = "yes" ] && [ -d "$target/.git" ]; then
+      log "  Initialisiere Submodules fuer $dir"
+      git -C "$target" submodule update --init --recursive --depth 1 2>&1 || {
+        log "  [WARN] Submodule-Init fuer $dir fehlgeschlagen – Build evtl. unvollstaendig"
+      }
+    fi
+
     log "  [OK] $dir geklont"
   done
 }
