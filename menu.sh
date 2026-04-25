@@ -8,6 +8,9 @@ SETTINGS_FILE="$HOME/.build_settings.env"
 SCREEN_MAP=("php_build:setup_php.sh" "nginx_build:setup_nginx.sh" "dovecot_build:setup_dovecot.sh" "postfix_build:setup_postfix.sh")
 SCRIPT_FILES=(setup_dovecot.sh setup_postfix.sh setup_php.sh setup_nginx.sh setup-zpush.sh setup_local_repo.sh setup_backup_restore.sh unban_ip.sh f2b_test.sh)
 
+# ===================== COLORS =====================
+R=196 G=82 Y=220 B=69 C=51 P=183 GR=242 W=255 O=215
+
 # ===================== HELPERS =====================
 
 get_env_var() {
@@ -25,9 +28,10 @@ screen_list_cached() {
   printf '%s' "$screen_cache"
 }
 
-screen_active() {
-  screen_list_cached | grep -qE "\.$1\b"
-}
+screen_active()  { screen_list_cached | grep -qE "\.$1\b"; }
+screen_pid()     { local l; l="$(screen_list_cached | grep -E "\.$1\b")" && echo "${l%%.*}"; }
+screen_uptime()  { local p; p="$(screen_pid "$1")" && [ -n "$p" ] && ps -o etimes= -p "$p" 2>/dev/null | awk '{printf "%dh%dm",$1/3600,($1%3600)/60}'; }
+screen_state()   { screen_list_cached | grep -E "\.$1\b" | grep -q 'Detached' && echo "Detached" || echo "Attached"; }
 
 screen_count() {
   local c=0 sn
@@ -36,20 +40,6 @@ screen_count() {
     screen_active "$sn" && c=$((c + 1))
   done
   echo "$c"
-}
-
-screen_pid() {
-  local line
-  line="$(screen_list_cached | grep -E "\.$1\b")" && echo "${line%%.*}"
-}
-
-screen_uptime() {
-  local pid
-  pid="$(screen_pid "$1")" && [ -n "$pid" ] && ps -o etimes= -p "$pid" 2>/dev/null | awk '{printf "%dh %dm",$1/3600,($1%3600)/60}'
-}
-
-screen_state() {
-  screen_list_cached | grep -E "\.$1\b" | grep -q 'Detached' && echo "Detached" || echo "Attached"
 }
 
 get_log_for_screen() {
@@ -66,7 +56,6 @@ load_settings() {
   : "${FORCE_REBUILD:=no}"
   : "${USE_PGO:=yes}"
   : "${USE_LTO:=yes}"
-  : "${USE_SCREEN:=yes}"
 }
 
 save_settings() {
@@ -74,16 +63,12 @@ save_settings() {
 FORCE_REBUILD="$FORCE_REBUILD"
 USE_PGO="$USE_PGO"
 USE_LTO="$USE_LTO"
-USE_SCREEN="$USE_SCREEN"
 EOF
 }
 
 opt_args() {
   local -n _oa_arr="$1"; shift
-  local v
-  for v in "$@"; do
-    [ -n "$v" ] && _oa_arr+=("$v")
-  done
+  local v; for v in "$@"; do [ -n "$v" ] && _oa_arr+=("$v"); done
 }
 
 ensure_deps() {
@@ -92,8 +77,7 @@ ensure_deps() {
   command -v fzf  >/dev/null 2>&1 || need+=(fzf)
   command -v curl >/dev/null 2>&1 || need+=(curl)
   (( ${#need[@]} == 0 )) && return
-
-  command -v gum >/dev/null 2>&1 && gum style --bold --foreground 196 "Installiere: ${need[*]}" || echo "Installiere: ${need[*]}"
+  command -v gum >/dev/null 2>&1 && gum style --bold --foreground "$R" "Installiere: ${need[*]}" || echo "Installiere: ${need[*]}"
   if ! command -v gum >/dev/null 2>&1; then
     mkdir -p /etc/apt/keyrings
     curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null
@@ -125,60 +109,71 @@ ensure_env_files() {
 
 # ===================== UI =====================
 
-SYS_INFO=""
+_ok()   { gum style --foreground "$G"  "$1"; }
+_warn() { gum style --foreground "$Y" "$1"; }
+_fail() { gum style --foreground "$R"    "$1"; }
+_dim()  { gum style --foreground "$GR"   "$1"; }
+_bold() { gum style --bold --foreground "$W" "$1"; }
+_col()  { local c="$1"; shift; gum style --foreground "$c" "$@"; }
+
+badge() {
+  local label="$1" val="$2"
+  if [ "$val" = "yes" ]; then
+    gum style --foreground "$G" --bold "\u25CF $label"
+  else
+    gum style --foreground "$GR" "\u25CB $label"
+  fi
+}
+
+SYS_LINE=""
 cache_sys_info() {
-  [ -n "$SYS_INFO" ] && return
+  [ -n "$SYS_LINE" ] && return
   local h c m a
   h="$(hostname -s 2>/dev/null || echo '?')"
   c="$(nproc 2>/dev/null || echo '?')"
   m="$(awk '/MemTotal/{printf "%.0fG",$2/1048576}' /proc/meminfo 2>/dev/null || echo '?')"
   a="$(uname -m 2>/dev/null || echo '?')"
-  SYS_INFO="$h | ${c}C | ${m} | $a"
-}
-
-badge() {
-  local label="$1" val="$2" on_color=82 off_color=242
-  [ "$val" = "yes" ] && gum style --foreground "$on_color" "$label" || gum style --foreground "$off_color" "$label"
+  SYS_LINE="$h  \u2502  ${c} Cores  \u2502  ${m} RAM  \u2502  $a"
 }
 
 draw_header() {
-  local title="${1:-}" extras="${2:-}" header_text
+  local title="${1:-}" extras="${2:-}"
   cache_sys_info
-  header_text="$(gum style --bold "$SYS_INFO")"
-  header_text+="\n$(badge PGO "$USE_PGO")  $(badge LTO "$USE_LTO")  $(badge Force "$FORCE_REBUILD")  $(badge Screen "$USE_SCREEN")"
+
+  local hdr=""
+  if [ -n "$title" ]; then
+    hdr+="$(gum style --bold --foreground "$C" "$title")\n"
+  fi
+  hdr+="$(gum style --foreground "$W" "$SYS_LINE")\n"
+  hdr+="$(badge PGO "$USE_PGO") $(badge LTO "$USE_LTO") $(badge Force "$FORCE_REBUILD")"
+
   local sc; sc="$(screen_count)"
-  [ "$sc" -gt 0 ] && header_text+="\n$(gum style --foreground 220 "$sc Screen-Session(s) aktiv")"
-  [ -n "$extras" ] && header_text+="\n$extras"
-  [ -n "$title" ] && header_text="$(gum style --bold "$title")\n$header_text"
-  gum style --border double --padding "0 2" --align center --foreground 51 "$header_text"
+  [ "$sc" -gt 0 ] && hdr+="\n$(gum style --foreground "$Y" "\u26A1 $sc Session(s)")"
+  [ -n "$extras" ] && hdr+="\n$extras"
+
+  gum style --border double --padding "0 3" --align center --foreground "$C" "$hdr"
 }
 
-C_OK="$(gum style --foreground 82 'OK')"
-C_FAIL="$(gum style --foreground 196 'FAIL')"
-C_DIM="$(gum style --foreground 242 '--')"
-
-ok()   { gum style --foreground 82  "$1"; }
-warn() { gum style --foreground 220 "$1"; }
-fail() { gum style --foreground 196 "$1"; }
-dim()  { gum style --foreground 242 "$1"; }
+draw_box() {
+  local title="$1" color="${2:-$C}"; shift 2
+  local body
+  body="$(printf '%s\n' "$@")"
+  gum style --border rounded --padding "0 1" --foreground "$color" \
+    "$(gum style --bold --foreground "$color" " $title ")\n$body"
+}
 
 choose() {
-  local header_text="${1:-}"; shift
-  printf '%s\n' "$@" | gum choose --header="$header_text" \
-    --cursor=" > " --cursor.foreground=51 --selected.foreground=82 --height=30
+  local hdr="${1:-}"; shift
+  printf '%s\n' "$@" | gum choose --header="$hdr" \
+    --cursor=" \u276F " --cursor.foreground="$C" --selected.foreground="$G" --height=30
 }
 
-choose_or_back() {
-  choose "$@" "Zurueck" || echo "Zurueck"
-}
+choose_or_back() { choose "$@" "$(dim "\u2190 Zurueck")" || echo "Zurueck"; }
 
-ask_path() {
-  gum input --placeholder="Pfad (leer = latest)" 3>/dev/null || echo ""
-}
-
-ask_confirm() {
-  local msg="$1"; shift
-  gum confirm "$msg" "$@" 2>/dev/null
+ask_path()    { gum input --placeholder="Pfad (leer = latest)" 3>/dev/null || echo ""; }
+ask_confirm() { local msg="$1"; shift; gum confirm "$msg" "$@" 2>/dev/null; }
+ask_screen()  {
+  gum confirm "\u25B6 Im Hintergrund starten? (Screen)" --affirmative="Screen" --negative="Vordergrund" 2>/dev/null
 }
 
 # ===================== RUNNERS =====================
@@ -186,18 +181,21 @@ ask_confirm() {
 run_script() {
   local script="$1"; shift
   local path="$SCRIPT_DIR/$script"
-  [ -f "$path" ] || { fail "Nicht gefunden: $path"; read -r -p " Enter..."; return 1; }
+  [ -f "$path" ] || { _fail "Nicht gefunden: $path"; read -r -p " Enter..."; return 1; }
   chmod 755 "$path" 2>/dev/null || true
 
   echo
-  gum style --bold --foreground 51 "  $script $*"
-  dim "  PGO=$USE_PGO LTO=$USE_LTO Force=$FORCE_REBUILD"
+  draw_box "$script $*" "$C" "$(dim "PGO=$USE_PGO  LTO=$USE_LTO  Force=$FORCE_REBUILD")"
   echo
 
   FORCE_REBUILD="$FORCE_REBUILD" USE_PGO="$USE_PGO" USE_LTO="$USE_LTO" bash "$path" "$@"
   local rc=$?
   echo
-  [ "$rc" -eq 0 ] && ok "Fertig (OK)" || fail "Fertig (Exit: $rc)"
+  if [ "$rc" -eq 0 ]; then
+    draw_box "Fertig" "$G" "$(_ok "\u2714") Build erfolgreich"
+  else
+    draw_box "Fehler" "$R" "$(_fail "\u2718") Exit-Code: $rc"
+  fi
   read -r -p " Enter fuer Menue..." _
   return $rc
 }
@@ -206,7 +204,7 @@ run_in_screen() {
   local script="$1"; shift
   local sname="$1"; shift
   local path="$SCRIPT_DIR/$script"
-  [ -f "$path" ] || { fail "Nicht gefunden: $path"; return 1; }
+  [ -f "$path" ] || { _fail "Nicht gefunden: $path"; return 1; }
   chmod 755 "$path" 2>/dev/null || true
 
   if ! command -v screen >/dev/null 2>&1; then
@@ -214,7 +212,16 @@ run_in_screen() {
   fi
 
   if screen_active "$sname"; then
-    ask_confirm "Session '$sname' laeuft bereits ($(screen_state "$sname")). Anhaengen?" && screen -r "$sname"
+    local st; st="$(screen_state "$sname")"
+    local up; up="$(screen_uptime "$sname")"
+    echo
+    draw_box "Session laeuft" "$Y" \
+      "Name:   $sname ($st)" \
+      "Uptime: ${up:---}" \
+      "" \
+      "$(dim "screen -r $sname")  zum Anhaengen"
+    echo
+    ask_confirm "Anhaengen?" && screen -r "$sname"
     return 0
   fi
 
@@ -233,14 +240,14 @@ run_in_screen() {
   sleep 0.3
   if screen_active "$sname"; then
     echo
-    local info="$sname gestartet"
-    [ -n "$logfile" ] && info+="\n  Log: $logfile"
-    info+="\n\n  screen -r $sname  (Anhaengen)\n  Strg+A D        (Trennen)"
-    gum style --border rounded --padding "0 1" --foreground 82 \
-      "$(gum style --bold "$info")"
+    local info="Session  $(_col "$G" "$sname")  gestartet"
+    [ -n "$logfile" ] && info+="\nLog      $(dim "$logfile")"
+    info+="\n\n  $(dim "screen -r $sname")   Anhaengen"
+    info+="\n  $(dim "Strg+A D")           Trennen"
+    draw_box "Screen gestartet" "$G" "$info"
     echo
   else
-    fail "Session '$sname' konnte nicht gestartet werden."
+    _fail "Session '$sname' konnte nicht gestartet werden."
   fi
   read -r -p " Enter..." _
 }
@@ -248,7 +255,7 @@ run_in_screen() {
 run_build() {
   local script="$1"; shift
   local sname="$1"; shift
-  if [ "$USE_SCREEN" = "yes" ]; then
+  if ask_screen; then
     run_in_screen "$script" "$sname" "$@"
   else
     run_script "$script" "$@"
@@ -258,8 +265,7 @@ run_build() {
 do_restore() {
   local script="$1" sname="$2"; shift 2
   local p; p="$(ask_path)"
-  local -a args=()
-  opt_args args "$p"
+  local -a args=(); opt_args args "$p"
   if [ "$sname" = "-" ]; then
     run_script "$script" "$@" "${args[@]}"
   else
@@ -277,22 +283,21 @@ do_custom_args() {
 
 menu_screens() {
   while true; do
-    clear
-    draw_header "Screen Sessions"
-    echo
+    clear; draw_header "Screen Sessions"; echo
 
-    local items=() snames=() log_items=() idx=0
+    local items=() snames=() log_items=()
     for entry in "${SCREEN_MAP[@]}"; do
       IFS=: read -r sn sc <<< "$entry"
       local label="${sn%_build}" line
       if screen_active "$sn"; then
-        local pid up state
+        local pid up st st_c
         pid="$(screen_pid "$sn")"
         up="$(screen_uptime "$sn")"
-        state="$(screen_state "$sn")"
-        printf -v line "[$C_OK]  %-10s  PID %-6s  %s  %s" "$label" "${pid:---}" "${up:---}" "$state"
+        st="$(screen_state "$sn")"
+        [ "$st" = "Detached" ] && st_c="$Y" || st_c="$G"
+        printf -v line "$(_ok "\u25CF")  %-10s  PID %s  %s  %s" "$label" "${pid:----}" "${up:----}" "$(_col "$st_c" "$st")"
       else
-        printf -v line "[$C_DIM]  %-10s  ---" "$label"
+        printf -v line "$(_dim "\u25CB")  %-10s  $(dim "---")" "$label"
       fi
       items+=("$line")
       snames+=("$sn")
@@ -307,24 +312,22 @@ menu_screens() {
     local choice
     choice=$(choose_or_back "" \
       "${items[@]}" \
-      "$(dim "---")  Alle Sessions beenden" \
-      "$(dim "---")  Logs anzeigen...") || return
+      "$(dim "\u2500\u2500\u2500 Aktionen \u2500\u2500\u2500")" \
+      "Alle Sessions beenden" \
+      "Logs anzeigen...") || return
 
     case "$choice" in
       "Zurueck") return ;;
       "Alle"*)
-        ask_confirm "Wirklich alle Sessions beenden?" || continue
+        ask_confirm "Wirklich alle beenden?" || continue
         for entry in "${SCREEN_MAP[@]}"; do
           IFS=: read -r sn _ <<< "$entry"
           screen_active "$sn" && screen -X -S "$sn" quit 2>/dev/null
         done
-        ok "Alle beendet."
-        read -r -p " Enter..." _ ;;
+        _ok "Alle beendet."; read -r -p " Enter..." _ ;;
       "Logs"*)
-        if [ ${#log_items[@]} -eq 0 ]; then
-          dim "Keine Logs gefunden."; read -r -p " Enter..." _; continue
-        fi
-        local lc; lc=$(choose "Log auswaehlen:" "${log_items[@]}") || continue
+        [ ${#log_items[@]} -eq 0 ] && { _dim "Keine Logs."; read -r -p " Enter..." _; continue; }
+        local lc; lc=$(choose "Log:" "${log_items[@]}") || continue
         local lname="${lc%%:*}" sn_found=""
         for entry in "${SCREEN_MAP[@]}"; do
           IFS=: read -r sn _ <<< "$entry"
@@ -332,30 +335,25 @@ menu_screens() {
         done
         if [ -n "$sn_found" ]; then
           local lp; lp="$(get_log_for_screen "$sn_found")"
-          clear
-          dim "=== $lp === (Strg+C = zurueck)"
-          tail -f "$lp"
+          clear; _dim "=== $lp === (Strg+C = zurueck)"; tail -f "$lp"
         fi ;;
-      *"$C_OK"*)
+      *"Aktionen"*) continue ;;
+      *$(_ok "\u25CF")*)
         local i=0 found=""
         for item in "${items[@]}"; do
           [ "$item" = "$choice" ] && found="${snames[$i]}" && break
           i=$((i + 1))
         done
-        if [ -n "$found" ] && screen_active "$found"; then
-          ask_confirm "'$found' anhaengen?" && screen -r "$found"
-        elif [ -n "$found" ]; then
-          dim "'$found' laeuft nicht mehr."; read -r -p " Enter..." _
-        fi ;;
-      *"$C_DIM"*)
+        [ -n "$found" ] && screen_active "$found" && ask_confirm "'$found' anhaengen?" && screen -r "$found" ;;
+      *$(_dim "\u25CB")*)
         local i=0 found=""
         for item in "${items[@]}"; do
           [ "$item" = "$choice" ] && found="${snames[$i]}" && break
           i=$((i + 1))
         done
         if [ -n "$found" ]; then
-          dim "'${found%_build}' nicht aktiv."
-          ask_confirm "Session starten?" || continue
+          _dim "'${found%_build}' nicht aktiv."
+          ask_confirm "Starten?" || continue
           local sc=""
           for entry in "${SCREEN_MAP[@]}"; do
             IFS=: read -r sn s <<< "$entry"
@@ -363,8 +361,6 @@ menu_screens() {
           done
           [ -n "$sc" ] && run_build "$sc" "$found" package
         fi ;;
-      *)
-        dim "Session nicht aktiv."; read -r -p " Enter..." _ ;;
     esac
   done
 }
@@ -376,43 +372,48 @@ menu_php_ext_select() {
   local pkg_dir="${PACKAGE_DIR:-/root/php-packages}"
   local ver="${PHP_VER_SHORT:-8.5}"
 
-  local exts items=() missing=0 total=0
-  exts="$(awk '/^PECL_EXTENSIONS=\(/,/^\)/' "$SCRIPT_DIR/setup_php.sh" 2>/dev/null | grep -oP '^\s+\K[a-z0-9_]+' | grep -v '^$')"
-  [ -z "$exts" ] && { fail "Keine Extensions gefunden."; return; }
+  local -a ext_names=()
+  eval "$(awk '/^PECL_EXTENSIONS=\(/,/\)/' "$SCRIPT_DIR/setup_php.sh" 2>/dev/null | head -60)"
+  for e in "${PECL_EXTENSIONS[@]:-}"; do ext_names+=("$e"); done
 
-  local ext desc pkg_name status line
-  for ext in $exts; do
+  if [ ${#ext_names[@]} -eq 0 ]; then
+    ext_names=()
+    while IFS= read -r line; do
+      local name="$(echo "$line" | xargs)"
+      [ -n "$name" ] && ext_names+=("$name")
+    done < <(awk '/^PECL_EXTENSIONS=\(/,/\)/' "$SCRIPT_DIR/setup_php.sh" | grep -oP '^\s+\K[a-z][a-z0-9_]*')
+  fi
+
+  [ ${#ext_names[@]} -eq 0 ] && { _fail "Keine Extensions gefunden."; return; }
+
+  local items=() missing=0 total=0
+  local ext desc pkg_name line
+  for ext in "${ext_names[@]}"; do
     total=$((total + 1))
-    desc="$(grep -oP "PECL_DESC\[$ext\]=\"\K[^\"]+" "$SCRIPT_DIR/setup_php.sh" 2>/dev/null || echo "$ext")"
-    pkg_name="$(grep -oP "PECL_PKGNAME\[$ext\]=\"\K[^\"]+" "$SCRIPT_DIR/setup_php.sh" 2>/dev/null || echo "$ext")"
+    desc="$(grep -oP "PECL_DESC\\[$ext\\]=\"\\K[^\"]+" "$SCRIPT_DIR/setup_php.sh" 2>/dev/null || echo "$ext")"
+    pkg_name="$(grep -oP "PECL_PKGNAME\\[$ext\\]=\"\\K[^\"]+" "$SCRIPT_DIR/setup_php.sh" 2>/dev/null || echo "$ext")"
     if compgen -G "${pkg_dir}/php${ver}-${pkg_name}_*_*.deb" >/dev/null 2>&1; then
-      printf -v line "%-20s [OK]    %s" "$ext" "$desc"
+      printf -v line "%-18s $(_ok "[OK]")    %s" "$ext" "$desc"
     else
-      printf -v line "%-20s [FEHLT] %s" "$ext" "$desc"
+      printf -v line "%-18s $(_fail "[ -- ]") %s" "$ext" "$desc"
       missing=$((missing + 1))
     fi
     items+=("$line")
   done
 
   clear
-  draw_header "PECL Extensions" "$(ok "$((total - missing))") OK  $(fail "$missing") fehlen  von $total"
+  draw_header "PECL Extensions" "$(_ok "$((total - missing))") OK  $(_fail "$missing") fehlen  von $total"
   echo
 
   local choices
   choices=$(printf '%s\n' "${items[@]}" | fzf --multi \
     --header="Tab = auswaehlen | Enter = starten | ESC = abbrechen" \
-    --height=~25 \
-    --layout=reverse-list \
-    --marker=" > " \
-    --pointer=" > " \
-    --color='fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,marker:#51afef,pointer:#51afef,header:#87af87,gutter:#444444,border:#444444' \
-    --bind 'tab:toggle' \
-    --delimiter=' ' \
-    --nth=1 \
-    --no-sort \
-    --ansi) || return 0
+    --height=~25 --layout=reverse-list --no-sort --ansi \
+    --marker=" \u276F " --pointer=" \u276F " \
+    --color="fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,marker:#51afef,pointer:#51afef,header:#87af87,gutter:#444444,border:#444444" \
+    --bind 'tab:toggle' --delimiter=' ' --nth=1) || return 0
 
-  [ -z "$choices" ] && { dim "Nichts ausgewaehlt."; return; }
+  [ -z "$choices" ] && { _dim "Nichts ausgewaehlt."; return; }
 
   local ext_list=()
   while IFS= read -r line; do
@@ -420,8 +421,8 @@ menu_php_ext_select() {
   done <<< "$choices"
 
   echo
-  gum style --bold "Baue ${#ext_list[@]} Extension(s):  ${ext_list[*]}"
-  ask_confirm "Starten? (PGO=$USE_PGO  LTO=$USE_LTO  Screen=$USE_SCREEN)" || return 0
+  draw_box "PECL Build" "$C" "$(_bold "${#ext_list[@]} Extension(s):")  ${ext_list[*]}"
+  ask_confirm "Starten? (PGO=$USE_PGO  LTO=$USE_LTO)" || return 0
 
   run_build "setup_php.sh" "php_build" pecl-only "${ext_list[@]}"
 }
@@ -435,18 +436,20 @@ menu_php() {
   [ -d "${PACKAGE_DIR:-/root/php-packages}" ] && pkg_count="$(ls "${PACKAGE_DIR:-/root/php-packages}"/*.deb 2>/dev/null | wc -l)"
 
   while true; do
-    clear; draw_header "PHP ${ver:-}" "${pkg_count} Pakete"; echo
+    clear; draw_header "PHP ${ver:-}" "$(_col "$P" "$pkg_count") Pakete"; echo
     local choice
     choice=$(choose_or_back "" \
-      "Komplett-Build" \
-      "Force-Rebuild (alles neu)" \
+      "$(_bold "\u25B6 Komplett-Build")" \
+      "$(_warn "\u26A0 Force-Rebuild")" \
       "Einzelne Extension(en)..." \
+      "$(dim "\u2500 Verwaltung \u2500")" \
       "Installieren" \
       "Status" \
       "Pakete auflisten" \
       "Extensions auflisten" \
       "Konfiguration pruefen" \
       "Verifikation" \
+      "$(dim "\u2500 Backup \u2500")" \
       "Backup erstellen" \
       "Backup wiederherstellen" \
       "Backups auflisten" \
@@ -456,12 +459,14 @@ menu_php() {
       "Komplett"*)   run_build "setup_php.sh" "php_build" package ;;
       "Force"*)      FORCE_REBUILD=yes run_build "setup_php.sh" "php_build" package ;;
       "Einzelne"*)   menu_php_ext_select ;;
+      *"Verwaltung"*) continue ;;
       "Installieren"*) run_script "setup_php.sh" install ;;
       "Status"*)     run_script "setup_php.sh" status ;;
       "Pakete"*)     run_script "setup_php.sh" list-packages ;;
       "Extensions"*) run_script "setup_php.sh" list-extensions ;;
       "Konfiguration"*) run_script "setup_php.sh" check-config ;;
       "Verifikation"*) run_script "setup_php.sh" verify ;;
+      *"Backup"*) continue ;;
       "Backup erstellen"*) run_script "setup_php.sh" backup ;;
       "wiederher"*)  do_restore "setup_php.sh" "php_build" restore ;;
       "Backups"*)    run_script "setup_php.sh" list-backups ;;
@@ -477,18 +482,32 @@ menu_nginx() {
   while true; do
     clear; draw_header "Nginx ${ver:-}"; echo
     local choice
-    choice=$(choose_or_back "" "Pakete bauen" "Installieren" "Status" "Backups auflisten" \
-      "Module auflisten" "Nach Updates suchen" "Konfiguration pruefen" "Verifikation" \
-      "Backup erstellen" "Backup wiederherstellen" "Deinstallieren" "Eigene Argumente...")
+    choice=$(choose_or_back "" \
+      "$(_bold "\u25B6 Pakete bauen")" \
+      "Installieren" \
+      "Status" \
+      "$(dim "\u2500 Details \u2500")" \
+      "Module auflisten" \
+      "Backups auflisten" \
+      "Nach Updates suchen" \
+      "Konfiguration pruefen" \
+      "Verifikation" \
+      "$(dim "\u2500 Backup \u2500")" \
+      "Backup erstellen" \
+      "Backup wiederherstellen" \
+      "Deinstallieren" \
+      "Eigene Argumente...")
     case "$choice" in
       "Pakete"*)      run_build "setup_nginx.sh" "nginx_build" package ;;
       "Installieren"*) run_script "setup_nginx.sh" install ;;
       "Status"*)      run_script "setup_nginx.sh" status ;;
-      "Backups"*)     run_script "setup_nginx.sh" list-backups ;;
+      *"Details"*) continue ;;
       "Module"*)      run_script "setup_nginx.sh" list-modules ;;
+      "Backups"*)     run_script "setup_nginx.sh" list-backups ;;
       "Updates"*)     run_script "setup_nginx.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_nginx.sh" check-config ;;
       "Verifikation"*) run_script "setup_nginx.sh" verify ;;
+      *"Backup"*) continue ;;
       "Backup erstellen"*) run_script "setup_nginx.sh" backup ;;
       "wiederher"*)   do_restore "setup_nginx.sh" "nginx_build" restore ;;
       "Deinstall"*)   run_script "setup_nginx.sh" uninstall ;;
@@ -502,21 +521,36 @@ menu_dovecot() {
   while true; do
     clear; draw_header "Dovecot"; echo
     local choice
-    choice=$(choose_or_back "" "Komplett-Build" "Nur Dovecot-Core" "Nur Pigeonhole" \
-      "Nur kompilieren" "Installieren" "Status" "Backups auflisten" "Pakete auflisten" \
-      "Nach Updates suchen" "Konfiguration pruefen" "Backup erstellen" "Backup wiederherstellen" \
-      "Deinstallieren" "Eigene Argumente...")
+    choice=$(choose_or_back "" \
+      "$(_bold "\u25B6 Komplett-Build")" \
+      "Nur Dovecot-Core" \
+      "Nur Pigeonhole" \
+      "Nur kompilieren" \
+      "$(dim "\u2500 Verwaltung \u2500")" \
+      "Installieren" \
+      "Status" \
+      "Backups auflisten" \
+      "Pakete auflisten" \
+      "Nach Updates suchen" \
+      "Konfiguration pruefen" \
+      "$(dim "\u2500 Backup \u2500")" \
+      "Backup erstellen" \
+      "Backup wiederherstellen" \
+      "Deinstallieren" \
+      "Eigene Argumente...")
     case "$choice" in
       "Komplett"*)    run_build "setup_dovecot.sh" "dovecot_build" package ;;
       "Nur Dovecot"*) run_build "setup_dovecot.sh" "dovecot_build" package-dovecot ;;
       "Nur Pig"*)     run_build "setup_dovecot.sh" "dovecot_build" package-pigeonhole ;;
       "Nur komp"*)    run_build "setup_dovecot.sh" "dovecot_build" build-only ;;
+      *"Verwaltung"*) continue ;;
       "Installieren"*) run_script "setup_dovecot.sh" install ;;
       "Status"*)      run_script "setup_dovecot.sh" status ;;
       "Backups"*)     run_script "setup_dovecot.sh" list-backups ;;
       "Pakete"*)      run_script "setup_dovecot.sh" list-packages ;;
       "Updates"*)     run_script "setup_dovecot.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_dovecot.sh" check-config ;;
+      *"Backup"*) continue ;;
       "Backup erstellen"*) run_script "setup_dovecot.sh" backup ;;
       "wiederher"*)   do_restore "setup_dovecot.sh" "dovecot_build" restore ;;
       "Deinstall"*)   run_script "setup_dovecot.sh" uninstall ;;
@@ -531,17 +565,30 @@ menu_postfix() {
   while true; do
     clear; draw_header "Postfix ${ver:-}"; echo
     local choice
-    choice=$(choose_or_back "" "Pakete bauen" "Installieren" "Status" "Backups auflisten" \
-      "Nach Updates suchen" "Konfiguration pruefen" "Verifikation" "Backup erstellen" \
-      "Backup wiederherstellen" "Deinstallieren" "Eigene Argumente...")
+    choice=$(choose_or_back "" \
+      "$(_bold "\u25B6 Pakete bauen")" \
+      "Installieren" \
+      "Status" \
+      "$(dim "\u2500 Details \u2500")" \
+      "Backups auflisten" \
+      "Nach Updates suchen" \
+      "Konfiguration pruefen" \
+      "Verifikation" \
+      "$(dim "\u2500 Backup \u2500")" \
+      "Backup erstellen" \
+      "Backup wiederherstellen" \
+      "Deinstallieren" \
+      "Eigene Argumente...")
     case "$choice" in
       "Pakete"*)      run_build "setup_postfix.sh" "postfix_build" package ;;
       "Installieren"*) run_script "setup_postfix.sh" install ;;
       "Status"*)      run_script "setup_postfix.sh" status ;;
+      *"Details"*) continue ;;
       "Backups"*)     run_script "setup_postfix.sh" list-backups ;;
       "Updates"*)     run_script "setup_postfix.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_postfix.sh" check-config ;;
       "Verifikation"*) run_script "setup_postfix.sh" verify ;;
+      *"Backup"*) continue ;;
       "Backup erstellen"*) run_script "setup_postfix.sh" backup ;;
       "wiederher"*)   do_restore "setup_postfix.sh" "postfix_build" restore ;;
       "Deinstall"*)   run_script "setup_postfix.sh" uninstall ;;
@@ -561,25 +608,28 @@ menu_zpush() {
   esac
 }
 
+# ===================== LOCAL REPO =====================
+
 repo_info() {
-  local envf="$SCRIPT_DIR/setup_local_repo.env" repo_dir="" gpg_key="" apt_src=""
+  local envf="$SCRIPT_DIR/setup_local_repo.env" repo_dir=""
   [ -f "$envf" ] && source "$envf"
   repo_dir="${REPO_DIR:-/var/local/custom-repo}"
 
-  local deb_count=0 disk="" signed="nein" apt_ok="--"
+  local deb_count=0 disk="" signed="nein" apt_ok="--" gpg_s="--"
   if [ -d "$repo_dir" ]; then
     deb_count="$(find "$repo_dir" -maxdepth 1 -name '*.deb' 2>/dev/null | wc -l)"
     disk="$(du -sh "$repo_dir" 2>/dev/null | cut -f1)"
     [ -f "$repo_dir/InRelease" ] && signed="ja"
   fi
-  if [ -f /etc/apt/sources.list.d/local-mail-repo.list ]; then
-    apt_ok="$(grep -c '^deb ' /etc/apt/sources.list.d/local-mail-repo.list 2>/dev/null || echo 0)"
-    apt_ok="$((apt_ok > 0)) Eintrag"
-  fi
-  local gpg_status="--"
-  [ -f /etc/apt/keyrings/custom-repo.gpg ] && gpg_status="vorhanden"
+  [ -f /etc/apt/sources.list.d/local-mail-repo.list ] && apt_ok="$(grep -c '^deb ' /etc/apt/sources.list.d/local-mail-repo.list 2>/dev/null || echo 0)" && apt_ok="$((apt_ok > 0))"
+  [ -f /etc/apt/keyrings/custom-repo.gpg ] && gpg_s="ja"
 
-  echo "${deb_count} Pakete | ${disk:---} | Signiert: ${signed} | GPG: ${gpg_status} | apt: ${apt_ok}"
+  local s_c a_c g_c
+  [ "$signed" = "ja" ] && s_c="$G" || s_c="$GR"
+  [ "$apt_ok" = "1" ] && a_c="$G" || a_c="$GR"
+  [ "$gpg_s" = "ja" ] && g_c="$G" || g_c="$GR"
+
+  echo "$(_col "$P" "$deb_count") Pakete  $(dim "|")  ${disk:---}  $(dim "|")  Signiert: $(_col "$s_c" "$signed")  $(dim "|")  GPG: $(_col "$g_c" "$gpg_s")  $(dim "|")  apt: $(_col "$a_c" "${apt_ok:-0}")"
 }
 
 repo_browse() {
@@ -588,7 +638,7 @@ repo_browse() {
   repo_dir="${REPO_DIR:-/var/local/custom-repo}"
 
   if [ ! -d "$repo_dir" ] || ! ls "$repo_dir"/*.deb >/dev/null 2>&1; then
-    dim "Keine Pakete im Repository."; read -r -p " Enter..." _; return
+    _dim "Keine Pakete im Repository."; read -r -p " Enter..." _; return
   fi
 
   local -a items=()
@@ -602,12 +652,12 @@ repo_browse() {
     inst_ver="$(dpkg-query -W -f '${Version}' "$pkg_name" 2>/dev/null || true)"
     if [ -n "$inst_ver" ]; then
       if [ "$inst_ver" = "$pkg_ver" ]; then
-        inst_state="$(ok installiert)"
+        inst_state="$(_ok "\u2714")"
       else
-        inst_state="$(warn "${inst_ver}")"
+        inst_state="$(_warn "\u2191${inst_ver}")"
       fi
     else
-      inst_state="$(dim nicht inst.)"
+      inst_state="$(_dim "\u25CB")"
     fi
     items+=("${pkg_name:-$(basename "$deb")}  ${pkg_ver:---}  ${pkg_size}  ${inst_state}")
   done
@@ -615,22 +665,19 @@ repo_browse() {
   clear; draw_header "Repo: Pakete durchsuchen"; echo
   local sel
   sel=$(printf '%s\n' "${items[@]}" | fzf \
-    --header="Paket                     Version           Groesse  Status" \
+    --header="Paket                Version       Size   Status" \
     --height=~30 --layout=reverse-list --no-sort --ansi \
-    --color='fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,header:#87af87,border:#444444') || return
+    --color="fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,header:#87af87,border:#444444") || return
 
   [ -z "$sel" ] && return
   local pkg="${sel%% *}"
 
   clear; draw_header "Paket: $pkg"; echo
-  local deb_path
-  deb_path="$(find "$repo_dir" -maxdepth 1 -name "${pkg}_*.deb" | head -1)"
+  local deb_path; deb_path="$(find "$repo_dir" -maxdepth 1 -name "${pkg}_*.deb" | head -1)"
   if [ -n "$deb_path" ]; then
-    gum style --bold "Metadaten:"
-    dpkg-deb -I "$deb_path" 2>/dev/null | sed 's/^/  /'
+    draw_box "Metadaten" "$C" "$(dpkg-deb -I "$deb_path" 2>/dev/null)"
     echo
-    gum style --bold "Dateien:"
-    dpkg-deb -c "$deb_path" 2>/dev/null | head -40 | sed 's/^/  /'
+    draw_box "Dateien" "$C" "$(dpkg-deb -c "$deb_path" 2>/dev/null | head -40)"
     echo
   fi
   read -r -p " Enter..." _
@@ -642,21 +689,20 @@ repo_install_select() {
   repo_dir="${REPO_DIR:-/var/local/custom-repo}"
 
   if [ ! -d "$repo_dir" ] || ! ls "$repo_dir"/*.deb >/dev/null 2>&1; then
-    dim "Keine Pakete im Repository."; read -r -p " Enter..." _; return
+    _dim "Keine Pakete."; read -r -p " Enter..." _; return
   fi
 
-  local -a items=() deb_paths=()
+  local -a items=()
   local deb pkg_name inst_ver
   for deb in "$repo_dir"/*.deb; do
     [ -f "$deb" ] || continue
     pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || basename "$deb")"
     inst_ver="$(dpkg-query -W -f '${Version}' "$pkg_name" 2>/dev/null || true)"
     if [ -n "$inst_ver" ]; then
-      items+=("$(ok "[OK]")  $pkg_name  ($inst_ver)")
+      items+=("$(_ok "\u2714") $pkg_name ($inst_ver)")
     else
-      items+=("$(fail "[ -- ]")  $pkg_name")
+      items+=("$(_dim "\u25CB") $pkg_name")
     fi
-    deb_paths+=("$(basename "$deb")")
   done
 
   clear; draw_header "Pakete installieren"; echo
@@ -664,25 +710,22 @@ repo_install_select() {
   choices=$(printf '%s\n' "${items[@]}" | fzf --multi \
     --header="Tab = auswaehlen | Enter = installieren | ESC = abbrechen" \
     --height=~25 --layout=reverse-list --no-sort --ansi \
-    --color='fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,marker:#51afef,pointer:#51afef,header:#87af87,border:#444444') || return
+    --color="fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,marker:#51afef,pointer:#51afef,header:#87af87,border:#444444") || return
 
-  [ -z "$choices" ] && { dim "Nichts ausgewaehlt."; return; }
+  [ -z "$choices" ] && { _dim "Nichts ausgewaehlt."; return; }
 
   local -a to_install=()
   while IFS= read -r line; do
-    local p="${line##*  }"
-    [ "$p" = "$line" ] && p="$(echo "$line" | awk '{print $2}')"
+    local p="$(echo "$line" | awk '{print $2}')"
     to_install+=("$p")
   done <<< "$choices"
 
   echo
-  gum style --bold "Installiere ${#to_install[@]} Paket(e):  ${to_install[*]}"
-  ask_confirm "apt install ausfuehren?" || return
+  draw_box "apt install" "$B" "$(_bold "${#to_install[@]} Paket(e):")  ${to_install[*]}"
+  ask_confirm "Installieren?" || return
 
   DEBIAN_FRONTEND=noninteractive apt-get install -y "${to_install[@]}"
-  echo
-  ok "Fertig."
-  read -r -p " Enter..." _
+  echo; _ok "Fertig."; read -r -p " Enter..." _
 }
 
 repo_sync() {
@@ -690,69 +733,65 @@ repo_sync() {
   [ -f "$envf" ] && source "$envf"
   local repo_dir="${REPO_DIR:-/var/local/custom-repo}"
   local -a pkg_dirs=()
-  local d label
+  local d
   for d in "${DOVECOT_PKG_DIR:-}" "${POSTFIX_PKG_DIR:-}" "${NGINX_PKG_DIR:-}" "${PHP_PKG_DIR:-}"; do
     [ -n "$d" ] && [ -d "$d" ] && pkg_dirs+=("$d")
   done
 
-  if [ ${#pkg_dirs[@]} -eq 0 ]; then
-    dim "Keine Paket-Quellen gefunden."; read -r -p " Enter..." _; return
-  fi
+  [ ${#pkg_dirs[@]} -eq 0 ] && { _dim "Keine Quellen."; read -r -p " Enter..." _; return; }
 
   echo
-  local total_new=0
+  local total_new=0 lines=""
   for d in "${pkg_dirs[@]}"; do
-    label="$(basename "$d")"
+    local label="$(basename "$d")"
     if ! ls "$d"/*.deb >/dev/null 2>&1; then
-      dim "  $label: keine .deb Dateien"; continue
+      lines+="$(_dim "\u25CB $label: leer")\n"; continue
     fi
     local new=0
     for deb in "$d"/*.deb; do
-      [ -f "$deb" ] || continue
-      if [ ! -f "$repo_dir/$(basename "$deb")" ]; then
-        new=$((new + 1))
-      fi
+      [ -f "$deb" ] && [ ! -f "$repo_dir/$(basename "$deb")" ] && new=$((new + 1))
     done
     if [ "$new" -gt 0 ]; then
-      ok "  $label: $new neue Pakete"
+      lines+="$(_ok "\u2714 $label: $new neu")\n"
       total_new=$((total_new + new))
     else
-      dim "  $label: aktuell"
+      lines+="$(_dim "\u25CB $label: aktuell")\n"
     fi
   done
 
   if [ "$total_new" -eq 0 ]; then
-    dim "\nAlle Pakete sind bereits im Repo."; read -r -p " Enter..." _; return
+    draw_box "Sync" "$GR" "$lines" "$(dim "Alles aktuell")"
+    read -r -p " Enter..." _; return
   fi
 
-  echo
-  ask_confirm "$total_new neue Pakete synchronisieren und Index aktualisieren?" || return
+  draw_box "Sync: $total_new neu" "$Y" "$lines"
+  ask_confirm "Synchronisieren + Index aktualisieren?" || return
   run_script "setup_local_repo.sh" update
 }
 
 menu_localrepo() {
   while true; do
-    clear
-    draw_header "Lokales APT-Repository" "$(repo_info)"
-    echo
+    clear; draw_header "Lokales APT-Repository" "$(repo_info)"; echo
     local choice
     choice=$(choose_or_back "" \
-      "Repo einrichten (init)" \
-      "Pakete synchronisieren + aktualisieren" \
-      "Pakete durchsuchen / Details" \
-      "Pakete installieren (apt)" \
-      "Repo Status (Detail)" \
+      "$(_bold "Repo einrichten")" \
+      "$(_ok "Pakete synchronisieren")" \
+      "$(_col "$C" "Pakete durchsuchen")" \
+      "$(_col "$B" "Pakete installieren")" \
+      "$(dim "\u2500 Verwaltung \u2500")" \
+      "Status (Detail)" \
       "GPG Schluessel erzeugen" \
       "Public Key exportieren" \
       "Release neu signieren" \
       "Alle DEBs signieren" \
-      "Repo entfernen" \
+      "$(_fail "Repo entfernen")" \
       "Eigene Argumente...")
     case "$choice" in
       "einrichten"*)       run_script "setup_local_repo.sh" install ;;
       "synchronisieren"*)  repo_sync ;;
       "durchsuchen"*)      repo_browse ;;
       "installieren"*)     repo_install_select ;;
+      *"Verwaltung"*) continue ;;
       "Status"*)           run_script "setup_local_repo.sh" status ;;
       "GPG"*)              run_script "setup_local_repo.sh" init-gpg ;;
       "Public"*)           run_script "setup_local_repo.sh" export-key ;;
@@ -765,22 +804,37 @@ menu_localrepo() {
   done
 }
 
+# ===================== MORE MENUS =====================
+
 menu_backuprestore() {
   while true; do
     clear; draw_header "Backup / Restore"; echo
     local choice
-    choice=$(choose_or_back "" "Full Backup" "Nur Postfix" "Nur Dovecot" "Nur Nginx" \
-      "Full Restore" "Postfix Restore" "Dovecot Restore" "Nginx Restore" \
-      "Backups auflisten" "Backup verifizieren" "Eigene Argumente...")
+    choice=$(choose_or_back "" \
+      "$(_bold "\u25B2 Full Backup")" \
+      "Nur Postfix" \
+      "Nur Dovecot" \
+      "Nur Nginx" \
+      "$(dim "\u2500 Restore \u2500")" \
+      "Full Restore" \
+      "Postfix Restore" \
+      "Dovecot Restore" \
+      "Nginx Restore" \
+      "$(dim "\u2500 Aktionen \u2500")" \
+      "Backups auflisten" \
+      "Backup verifizieren" \
+      "Eigene Argumente...")
     case "$choice" in
       "Full B"*)   run_script "setup_backup_restore.sh" backup ;;
       "Nur Post"*) run_script "setup_backup_restore.sh" backup-postfix ;;
       "Nur Dove"*) run_script "setup_backup_restore.sh" backup-dovecot ;;
       "Nur Ngin"*) run_script "setup_backup_restore.sh" backup-nginx ;;
+      *"Restore"*) continue ;;
       "Full R"*)   do_restore "setup_backup_restore.sh" "-" restore ;;
       "Postfix R"*) do_restore "setup_backup_restore.sh" "-" restore-postfix ;;
       "Dovecot R"*) do_restore "setup_backup_restore.sh" "-" restore-dovecot ;;
       "Nginx R"*)  do_restore "setup_backup_restore.sh" "-" restore-nginx ;;
+      *"Aktionen"*) continue ;;
       "auflisten"*) run_script "setup_backup_restore.sh" list ;;
       "verifizieren"*) do_restore "setup_backup_restore.sh" "-" verify ;;
       "Eigene"*)   do_custom_args "setup_backup_restore.sh" ;;
@@ -806,7 +860,7 @@ menu_unbanip() {
       "Bans"*)  run_script "unban_ip.sh" --bans ;;
       "Geziel"*)
         local t; t="$(gum input --placeholder='IP / CIDR / Domain')" || continue
-        [ -z "${t// }" ] && { fail "Kein Target."; continue; }
+        [ -z "${t// }" ] && { _fail "Kein Target."; continue; }
         run_script "unban_ip.sh" --unban "$t" ;;
       "Eigene"*) do_custom_args "unban_ip.sh" ;;
       *)        return ;;
@@ -831,20 +885,21 @@ menu_clean() {
     clear; draw_header "Build-Artefakte loeschen"; echo
     local choice
     choice=$(choose_or_back "" \
-      "PHP: Staging loeschen" \
-      "PHP: Build-Dir loeschen" \
-      "PHP: PECL-Quellen loeschen" \
-      "PHP: PGO-Profile loeschen" \
-      "PHP: Pakete (.deb) loeschen" \
-      "PHP: ALLES loeschen" \
-      "Nginx: Staging loeschen" \
-      "Dovecot: Staging loeschen" \
-      "Postfix: Staging loeschen" \
-      "Alle Staging loeschen" \
-      "ALLE Artefakte loeschen")
+      "$(_col "$P" "PHP:") Staging" \
+      "$(_col "$P" "PHP:") Build-Dir" \
+      "$(_col "$P" "PHP:") PECL-Quellen" \
+      "$(_col "$P" "PHP:") PGO-Profile" \
+      "$(_col "$P" "PHP:") Pakete (.deb)" \
+      "$(_fail "PHP: ALLES")" \
+      "$(dim "\u2500 Weitere \u2500")" \
+      "$(_col "$G" "Nginx:") Staging" \
+      "$(_col "$Y" "Dovecot:") Staging" \
+      "$(_col "$B" "Postfix:") Staging" \
+      "Alle Staging" \
+      "$(_fail "ALLE Artefakte")")
 
     [ "$choice" = "Zurueck" ] && return
-    ask_confirm "'$choice' wirklich loeschen?" || continue
+    ask_confirm "$(dim "$choice")  wirklich loeschen?" || continue
 
     local PE="setup_php.env" NE="setup_nginx.env" DE="setup_dovecot.env" FE="setup_postfix.env"
 
@@ -876,38 +931,33 @@ menu_clean() {
         rm -rf "$(get_env_var "$NE" STAGE_NGINX)" "$(get_env_var "$NE" BUILD_ROOT)/nginx-$(get_env_var "$NE" NGINX_VERSION)"
         rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)" "$(get_env_var "$FE" STAGE_POSTFIX)" ;;
     esac
-    ok "Bereinigt."; read -r -p " Enter..." _
+    _ok "\u2714 Bereinigt."; read -r -p " Enter..." _
   done
 }
 
 menu_settings() {
   while true; do
-    clear
-    draw_header "Build-Einstellungen"
-    echo
+    clear; draw_header "Build-Einstellungen"; echo
 
-    local pgo_s lto_s force_s screen_s
-    [ "$USE_PGO" = "yes" ]       && pgo_s="$(ok AN)"   || pgo_s="$(fail AUS)"
-    [ "$USE_LTO" = "yes" ]       && lto_s="$(ok AN)"   || lto_s="$(fail AUS)"
-    [ "$FORCE_REBUILD" = "yes" ]  && force_s="$(ok AN)"  || force_s="$(fail AUS)"
-    [ "$USE_SCREEN" = "yes" ]     && screen_s="$(ok AN)" || screen_s="$(fail AUS)"
+    local pgo_s lto_s force_s
+    [ "$USE_PGO" = "yes" ]       && pgo_s="$(_ok "AN")"   || pgo_s="$(_dim "AUS")"
+    [ "$USE_LTO" = "yes" ]       && lto_s="$(_ok "AN")"   || lto_s="$(_dim "AUS")"
+    [ "$FORCE_REBUILD" = "yes" ]  && force_s="$(_warn "AN")"  || force_s="$(_dim "AUS")"
 
-    gum style "  PGO           $pgo_s   Profile-Guided Optimization"
-    gum style "  LTO           $lto_s   Link-Time Optimization"
-    gum style "  Force-Rebuild $force_s  Alle Pakete neu bauen"
-    gum style "  Screen        $screen_s   Builds in Screen starten"
+    draw_box "Aktuelle Einstellungen" "$C" \
+      "$(printf '  %-16s %s   %s\n' "PGO" "$pgo_s" "$(dim "Profile-Guided Optimization")")" \
+      "$(printf '  %-16s %s   %s\n' "LTO" "$lto_s" "$(dim "Link-Time Optimization")")" \
+      "$(printf '  %-16s %s   %s\n' "Force-Rebuild" "$force_s" "$(dim "Alle Pakete neu bauen")")" \
+      "$(dim "  Screen wird pro Build abgefragt")"
     echo
 
     local choice
-    choice=$(choose_or_back "" "PGO umschalten" "LTO umschalten" "Force-Rebuild umschalten" \
-      "Screen umschalten" "Auf Defaults zuruecksetzen")
-
+    choice=$(choose_or_back "" "PGO umschalten" "LTO umschalten" "Force-Rebuild umschalten" "Auf Defaults zuruecksetzen")
     case "$choice" in
       "PGO"*)    [ "$USE_PGO" = "yes" ] && USE_PGO="no" || USE_PGO="yes"; save_settings ;;
       "LTO"*)    [ "$USE_LTO" = "yes" ] && USE_LTO="no" || USE_LTO="yes"; save_settings ;;
       "Force"*)  [ "$FORCE_REBUILD" = "yes" ] && FORCE_REBUILD="no" || FORCE_REBUILD="yes"; save_settings ;;
-      "Screen"*) [ "$USE_SCREEN" = "yes" ] && USE_SCREEN="no" || USE_SCREEN="yes"; save_settings ;;
-      "Defaults"*) FORCE_REBUILD="no" USE_PGO="yes" USE_LTO="yes" USE_SCREEN="yes"; save_settings; ok "Reset."; read -r -p " Enter..." _ ;;
+      "Defaults"*) FORCE_REBUILD="no" USE_PGO="yes" USE_LTO="yes"; save_settings; _ok "Reset."; read -r -p " Enter..." _ ;;
       *)         return ;;
     esac
   done
@@ -915,45 +965,48 @@ menu_settings() {
 
 menu_sysinfo() {
   clear; draw_header "System-Info"; echo
-  gum style --bold --foreground 51 "CPU"
-  lscpu 2>/dev/null | grep -E '^(Architecture|CPU\(s\)|Model name|Thread|Core|Socket|CPU max)' | sed 's/^/  /'
+
+  local cpu ram disk kernel uptime
+  cpu="$(lscpu 2>/dev/null | grep -E '^(Architecture|CPU\(s\)|Model name|Thread|Core|Socket|CPU max)' | sed 's/^/  /')"
+  ram="$(free -h 2>/dev/null | head -3 | sed 's/^/  /')"
+  disk="$(df -h / 2>/dev/null | head -2 | sed 's/^/  /')"
+  kernel="$(uname -a 2>/dev/null | sed 's/^/  /')"
+  uptime="$(uptime 2>/dev/null | sed 's/^/  /')"
+
+  local sections=()
+  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$C" "$(gum style --bold --foreground "$C" " CPU ")\n$cpu")")
+  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$G" "$(gum style --bold --foreground "$G" " RAM ")\n$ram")")
+  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$Y" "$(gum style --bold --foreground "$Y" " Disk ")\n$disk")")
+
+  gum join --align left --vertical "${sections[@]}"
   echo
-  gum style --bold --foreground 51 "RAM"
-  free -h 2>/dev/null | head -3 | sed 's/^/  /'
+
+  gum style --border rounded --padding "0 1" --foreground "$P" "$(gum style --bold --foreground "$P" " Kernel ")\n$kernel"
   echo
-  gum style --bold --foreground 51 "Disk"
-  df -h / 2>/dev/null | head -2 | sed 's/^/  /'
-  echo
-  gum style --bold --foreground 51 "Kernel"
-  uname -a 2>/dev/null | sed 's/^/  /'
-  echo
-  gum style --bold --foreground 51 "Uptime"
-  uptime 2>/dev/null | sed 's/^/  /'
+  gum style --border rounded --padding "0 1" --foreground "$B" "$(gum style --bold --foreground "$B" " Uptime ")\n$uptime"
   echo
   read -r -p " Enter fuer Menue..." _
 }
 
 check_all_updates() {
   clear; draw_header "Update-Check"; echo
-  gum style --bold "Pruefe alle Updates..."; echo
-  gum style --foreground 220 "--- Nginx ---"
-  bash "$SCRIPT_DIR/setup_nginx.sh" check-updates 2>&1 || true
+  _bold "Pruefe alle Updates..."; echo
+
+  draw_box "Nginx" "$G" "$(bash "$SCRIPT_DIR/setup_nginx.sh" check-updates 2>&1 || true)"
   echo
-  gum style --foreground 220 "--- Dovecot ---"
-  bash "$SCRIPT_DIR/setup_dovecot.sh" check-updates 2>&1 || true
+  draw_box "Dovecot" "$Y" "$(bash "$SCRIPT_DIR/setup_dovecot.sh" check-updates 2>&1 || true)"
   echo
-  gum style --foreground 220 "--- Postfix ---"
-  bash "$SCRIPT_DIR/setup_postfix.sh" check-updates 2>&1 || true
-  echo; ok "Fertig."
-  read -r -p " Enter fuer Menue..." _
+  draw_box "Postfix" "$B" "$(bash "$SCRIPT_DIR/setup_postfix.sh" check-updates 2>&1 || true)"
+  echo
+  _ok "\u2714 Fertig."; read -r -p " Enter fuer Menue..." _
 }
 
 git_update() {
   [ -d "$SCRIPT_DIR/.git" ] || return
   local output
-  output="$(git -C "$SCRIPT_DIR" pull 2>&1)" || { fail "git pull fehlgeschlagen"; return; }
+  output="$(git -C "$SCRIPT_DIR" pull 2>&1)" || { _fail "git pull fehlgeschlagen"; return; }
   echo "$output" | grep -qi "already up.to.date\|current" && return
-  gum style --border rounded --padding "0 1" --foreground 220 "Scripts aktualisiert. Neustart...\n\n$output"
+  draw_box "Scripts aktualisiert" "$Y" "$output" "\nNeustart in 2s..."
   sleep 2
   exec bash "$0" "$@"
 }
@@ -971,37 +1024,43 @@ main_menu() {
 
     local sc; sc="$(screen_count)"
     local screen_label="Screens"
-    [ "$sc" -gt 0 ] && screen_label="Screens ($(warn "$sc aktiv"))"
+    [ "$sc" -gt 0 ] && screen_label="Screens ($(_warn "$sc aktiv"))"
 
     local choice
     choice=$(choose "" \
-      "PHP ${php_ver:-}" \
-      "Nginx ${nginx_ver:-}" \
-      "Dovecot" \
-      "Postfix ${postfix_ver:-}" \
+      "$(_col "$P" "\u25CF") PHP ${php_ver:-}" \
+      "$(_col "$G" "\u25CF") Nginx ${nginx_ver:-}" \
+      "$(_col "$Y" "\u25CF") Dovecot" \
+      "$(_col "$B" "\u25CF") Postfix ${postfix_ver:-}" \
+      "$(dim "\u2500\u2500\u2500 Dienste \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")" \
       "Z-Push ActiveSync" \
       "Backup / Restore" \
       "Lokales Repository" \
+      "$(dim "\u2500\u2500\u2500 Tools \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")" \
       "IP Unban" \
       "Fail2Ban Test" \
       "$screen_label" \
+      "$(dim "\u2500\u2500\u2500 System \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")" \
       "Clean" \
       "Settings" \
       "System-Info" \
       "Updates pruefen" \
-      "Beenden") || break
+      "$(_fail "Beenden")") || break
 
     case "$choice" in
       PHP*)       menu_php ;;
       Nginx*)     menu_nginx ;;
       Dovecot*)   menu_dovecot ;;
       Postfix*)   menu_postfix ;;
+      *"Dienste"*) continue ;;
       Z-Push*)    menu_zpush ;;
       Backup*)    menu_backuprestore ;;
       Lokales*)   menu_localrepo ;;
+      *"Tools"*) continue ;;
       IP*)        menu_unbanip ;;
       Fail2Ban*)  menu_f2btest ;;
       Screen*|"Screens"*) menu_screens ;;
+      *"System"*) continue ;;
       Clean*)     menu_clean ;;
       Settings*)  menu_settings ;;
       System*)    menu_sysinfo ;;
