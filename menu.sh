@@ -168,7 +168,7 @@ choose() {
     --cursor=" \u276F " --cursor.foreground="$C" --selected.foreground="$G" --height=30
 }
 
-choose_or_back() { choose "$@" "$(dim "\u2190 Zurueck")" || echo "Zurueck"; }
+choose_or_back() { choose "$@" "$(_dim "\u2190 Zurueck")" || echo "Zurueck"; }
 
 ask_path()    { gum input --placeholder="Pfad (leer = latest)" 3>/dev/null || echo ""; }
 ask_confirm() { local msg="$1"; shift; gum confirm "$msg" "$@" 2>/dev/null; }
@@ -185,7 +185,7 @@ run_script() {
   chmod 755 "$path" 2>/dev/null || true
 
   echo
-  draw_box "$script $*" "$C" "$(dim "PGO=$USE_PGO  LTO=$USE_LTO  Force=$FORCE_REBUILD")"
+  draw_box "$script $*" "$C" "$(_dim "PGO=$USE_PGO  LTO=$USE_LTO  Force=$FORCE_REBUILD")"
   echo
 
   FORCE_REBUILD="$FORCE_REBUILD" USE_PGO="$USE_PGO" USE_LTO="$USE_LTO" bash "$path" "$@"
