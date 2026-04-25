@@ -77,7 +77,7 @@ ensure_deps() {
   command -v fzf  >/dev/null 2>&1 || need+=(fzf)
   command -v curl >/dev/null 2>&1 || need+=(curl)
   (( ${#need[@]} == 0 )) && return
-  command -v gum >/dev/null 2>&1 && gum style --bold --foreground "$R" "Installiere: ${need[*]}" || echo "Installiere: ${need[*]}"
+  command -v gum >/dev/null 2>&1 && gum style --bold --foreground "$R" -- "Installiere: ${need[*]}" || echo "Installiere: ${need[*]}"
   if ! command -v gum >/dev/null 2>&1; then
     mkdir -p /etc/apt/keyrings
     curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null
@@ -109,19 +109,19 @@ ensure_env_files() {
 
 # ===================== UI =====================
 
-_ok()   { gum style --foreground "$G"  "$1"; }
-_warn() { gum style --foreground "$Y" "$1"; }
-_fail() { gum style --foreground "$R"    "$1"; }
-_dim()  { gum style --foreground "$GR"   "$1"; }
-_bold() { gum style --bold --foreground "$W" "$1"; }
-_col()  { local c="$1"; shift; gum style --foreground "$c" "$@"; }
+_ok()   { gum style --foreground "$G"  -- "$1"; }
+_warn() { gum style --foreground "$Y" -- "$1"; }
+_fail() { gum style --foreground "$R"    -- "$1"; }
+_dim()  { gum style --foreground "$GR"   -- "$1"; }
+_bold() { gum style --bold --foreground "$W" -- "$1"; }
+_col()  { local c="$1"; shift; gum style --foreground "$c" -- "$@"; }
 
 badge() {
   local label="$1" val="$2"
   if [ "$val" = "yes" ]; then
-    gum style --foreground "$G" --bold "● $label"
+    gum style --foreground "$G" --bold -- "● $label"
   else
-    gum style --foreground "$GR" "○ $label"
+    gum style --foreground "$GR" -- "○ $label"
   fi
 }
 
@@ -143,16 +143,16 @@ draw_header() {
   local nl=$'\n'
   local hdr=""
   if [ -n "$title" ]; then
-    hdr+="$(gum style --bold --foreground "$C" "$title")${nl}"
+    hdr+="$(gum style --bold --foreground "$C" -- "$title")${nl}"
   fi
-  hdr+="$(gum style --foreground "$W" "$SYS_LINE")${nl}"
+  hdr+="$(gum style --foreground "$W" -- "$SYS_LINE")${nl}"
   hdr+="$(badge PGO "$USE_PGO") $(badge LTO "$USE_LTO") $(badge Force "$FORCE_REBUILD")"
 
   local sc; sc="$(screen_count)"
-  [ "$sc" -gt 0 ] && hdr+="${nl}$(gum style --foreground "$Y" "⚡ $sc Session(s)")"
+  [ "$sc" -gt 0 ] && hdr+="${nl}$(gum style --foreground "$Y" -- "⚡ $sc Session(s)")"
   [ -n "$extras" ] && hdr+="${nl}$extras"
 
-  gum style --border double --padding "0 3" --align center --foreground "$C" "$hdr"
+  gum style --border double --padding "0 3" --align center --foreground "$C" -- "$hdr"
 }
 
 draw_box() {
@@ -160,8 +160,8 @@ draw_box() {
   local nl=$'\n'
   local body
   body="$(printf '%s\n' "$@")"
-  gum style --border rounded --padding "0 1" --foreground "$color" \
-    "$(gum style --bold --foreground "$color" " $title ")${nl}${body}"
+  gum style --border rounded --padding "0 1" --foreground "$color" -- \
+    "$(gum style --bold --foreground "$color" -- " $title ")${nl}${body}"
 }
 
 choose() {
@@ -978,16 +978,16 @@ menu_sysinfo() {
 
   local nl=$'\n'
   local sections=()
-  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$C" "$(gum style --bold --foreground "$C" " CPU ")${nl}$cpu")")
-  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$G" "$(gum style --bold --foreground "$G" " RAM ")${nl}$ram")")
-  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$Y" "$(gum style --bold --foreground "$Y" " Disk ")${nl}$disk")")
+  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$C" -- "$(gum style --bold --foreground "$C" -- " CPU ")${nl}$cpu")")
+  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$G" -- "$(gum style --bold --foreground "$G" -- " RAM ")${nl}$ram")")
+  sections+=("$(gum style --border rounded --padding "0 1" --foreground "$Y" -- "$(gum style --bold --foreground "$Y" -- " Disk ")${nl}$disk")")
 
   gum join --align left --vertical "${sections[@]}"
   echo
 
-  gum style --border rounded --padding "0 1" --foreground "$P" "$(gum style --bold --foreground "$P" " Kernel ")${nl}$kernel"
+  gum style --border rounded --padding "0 1" --foreground "$P" -- "$(gum style --bold --foreground "$P" -- " Kernel ")${nl}$kernel"
   echo
-  gum style --border rounded --padding "0 1" --foreground "$B" "$(gum style --bold --foreground "$B" " Uptime ")${nl}$uptime"
+  gum style --border rounded --padding "0 1" --foreground "$B" -- "$(gum style --bold --foreground "$B" -- " Uptime ")${nl}$uptime"
   echo
   read -r -p " Enter fuer Menue..." _
 }
