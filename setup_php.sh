@@ -70,7 +70,7 @@ PECL_ZEND[opcache]="yes"
 PECL_EXTNAME[opcache]="opcache"
 PECL_DEPS[opcache]="php${PHP_VER_SHORT}-custom"
 PECL_GITURL[opcache]="built-in"
-PECL_CONFIGURE[opcache]="--enable-opcache"
+PECL_CONFIGURE[opcache]=""
 
 # --- 2. APCu -----------------------------------------------------------------
 PECL_DIRNAME[apcu]="apcu"
@@ -126,8 +126,8 @@ PECL_EXTNAME[mongodb]="mongodb"
 PECL_ZEND[mongodb]="no"
 PECL_DEPS[mongodb]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[mongodb]=""
-PECL_SUBDIR[mongodb]="pecl-tarball"
 PECL_CMAKE[mongodb]="yes"
+PECL_SUBMODULES[mongodb]="yes"
 
 # --- 7. AMQP -----------------------------------------------------------------
 PECL_DIRNAME[amqp]="php-amqp"
@@ -262,6 +262,7 @@ PECL_EXTNAME[zstd]="zstd"
 PECL_ZEND[zstd]="no"
 PECL_DEPS[zstd]="php${PHP_VER_SHORT}-custom libzstd1"
 PECL_CONFIGURE[zstd]=""
+PECL_SUBMODULES[zstd]="yes"
 
 # --- 19. Lz4 -----------------------------------------------------------------
 PECL_DIRNAME[lz4]="php-lz4"
@@ -273,6 +274,7 @@ PECL_EXTNAME[lz4]="lz4"
 PECL_ZEND[lz4]="no"
 PECL_DEPS[lz4]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[lz4]=""
+PECL_SUBMODULES[lz4]="yes"
 
 # --- 20. Ast -----------------------------------------------------------------
 PECL_DIRNAME[ast]="php-ast"
@@ -874,8 +876,7 @@ download_pecl_sources() {
 
     if [ -d "$target" ]; then
       if [ "${PECL_SUBMODULES[$ext]:-}" = "yes" ] && [ -d "$target/.git" ]; then
-        local _sm_check="$target/library/libxlsxwriter/third_party/md5/md5.c"
-        if [ ! -f "$_sm_check" ] || [ ! -d "$target/library/libxlsxwriter/third_party" ]; then
+        if [ -z "$(git -C "$target" submodule status 2>/dev/null | grep -v '^-' | head -1)" ]; then
           log "  Initialisiere fehlende Submodules fuer $dir"
           git -C "$target" submodule update --init --recursive --depth 1 2>&1 || {
             log "  [WARN] Submodule-Init fuer $dir fehlgeschlagen – Build evtl. unvollstaendig"
@@ -1018,7 +1019,7 @@ build_php() {
   CONF_ARGS="$CONF_ARGS --enable-pcntl"
   CONF_ARGS="$CONF_ARGS --with-enchant"
   CONF_ARGS="$CONF_ARGS --with-ffi"
-  CONF_ARGS="$CONF_ARGS --enable-opcache"
+  CONF_ARGS="$CONF_ARGS --enable-opcache=shared"
   CONF_ARGS="$CONF_ARGS --with-password-argon2"
   CONF_ARGS="$CONF_ARGS --enable-phar"
   CONF_ARGS="$CONF_ARGS --enable-posix"
@@ -1124,91 +1125,33 @@ build_pecl_extensions() {
   local std_dir="$src_dir/ext/standard"
   [ -d "$std_dir" ] || mkdir -p "$std_dir"
 
-  sed -i '/typedef.*smart_string/d' "$src_dir/Zend/zend_smart_str.h" 2>/dev/null || true
-  grep -rl 'typedef.*smart_string' "$src_dir/Zend/" "$src_dir/main/" 2>/dev/null | while read -r _f; do
-    sed -i '/typedef.*smart_string/d' "$_f"
-  done || true
-
   cat > "$std_dir/php_smart_string.h" <<'SMART_STRING_SHIM'
 #ifndef PHP_SMART_STRING_H
 #define PHP_SMART_STRING_H
 
-#include <string.h>
-#include <Zend/zend.h>
+/* PHP 8.5+ compatibility: smart_string is now { zend_string *s; }
+   defined in Zend/zend_smart_string_public.h (included by zend.h).
+   All smart_string_* functions are provided by Zend/zend_smart_str.h.
+   This header only adds backward-compatible functions removed in PHP 8.5. */
 
-typedef struct {
-    char *c;
-    size_t len;
-    size_t a;
-} smart_string;
+#include "Zend/zend.h"
+#include "Zend/zend_smart_str.h"
 
-#define SMART_STRING_OVERHEAD 128
-
-static zend_always_inline size_t smart_string_chunksz(smart_string *str, size_t len) {
-    return str->a ? str->a + (str->a >> 2) : len + SMART_STRING_OVERHEAD;
+/* smart_string_appends was removed in PHP 8.5 - provide as wrapper */
+#ifndef smart_string_appends
+static zend_always_inline void smart_string_appends(smart_string *str, const char *buf) {
+    smart_str_appendl(&str->s, buf, strlen(buf));
 }
+#endif
 
-static zend_always_inline void smart_string_alloc(smart_string *str, size_t len, zend_bool pre) {
-    if (!pre && str->c && str->len + len < str->a) {
-        return;
-    }
-    str->a = smart_string_chunksz(str, len);
-    str->c = pre ? perealloc(str->c, str->a, pre) : erealloc(str->c, str->a);
-}
-
-static zend_always_inline void smart_string_extend(smart_string *str, size_t len, zend_bool pre) {
-    smart_string_alloc(str, len, pre);
-}
-
-static zend_always_inline void smart_string_appendc(smart_string *str, char c) {
-    smart_string_alloc(str, 1, 0);
-    str->c[str->len++] = c;
-}
-
-static zend_always_inline void smart_string_appendl(smart_string *str, const char *buf, size_t len) {
-    smart_string_alloc(str, len, 0);
-    memcpy(str->c + str->len, buf, len);
-    str->len += len;
-}
-
-static zend_always_inline void smart_string_append(smart_string *str, const char *buf) {
-    smart_string_appendl(str, buf, strlen(buf));
-}
-
-static zend_always_inline void smart_string_append_long(smart_string *str, zend_long val) {
-    char buf[32];
-    size_t len = snprintf(buf, sizeof(buf), ZEND_LONG_FMT, val);
-    smart_string_appendl(str, buf, len);
-}
-
-static zend_always_inline void smart_string_append_unsigned(smart_string *str, zend_ulong val) {
-    char buf[32];
-    size_t len = snprintf(buf, sizeof(buf), ZEND_ULONG_FMT, val);
-    smart_string_appendl(str, buf, len);
-}
-
-#define smart_string_append_int(s, v) smart_string_append_long((s), (v))
-
-static zend_always_inline void smart_string_reset(smart_string *str) {
-    if (str->c) {
-        str->len = 0;
-    }
-}
-
-static zend_always_inline void smart_string_free(smart_string *str) {
-    if (str->c) {
-        efree(str->c);
-        str->c = NULL;
-    }
-    str->len = 0;
-    str->a = 0;
-}
-
-#define smart_string_0(s) smart_string_appendc((s), '\0')
+/* smart_string_0 was removed in PHP 8.5 */
+#ifndef smart_string_0
+#define smart_string_0(s) smart_str_appendc(&(s)->s, '\0')
+#endif
 
 #endif
 SMART_STRING_SHIM
-  log "  Shim: php_smart_string.h erzwungen"
+  log "  Shim: php_smart_string.h (PHP 8.5 compat)"
 
   if [ ! -f "$std_dir/php_smart_str.h" ]; then
     cat > "$std_dir/php_smart_str.h" <<'SMART_STR_SHIM'
@@ -1264,6 +1207,12 @@ DATETIME_SHIM
     fi
 
     if [ "$url" = "built-in" ]; then
+      local _so_name="${PECL_EXTNAME[$ext]:-$ext}.so"
+      if [ -f "$STAGE_PHP$PHP_EXTENSION_DIR/$_so_name" ]; then
+        log "  [OK] $ext – bereits als shared im Staging vorhanden"
+        continue
+      fi
+
       local built_in_dir="$src_dir/ext/${ext_dir_src}"
 
       if [ -d "$built_in_dir" ] && [ -f "$built_in_dir/config.m4" ]; then
@@ -1324,6 +1273,10 @@ DATETIME_SHIM
       log "  phpize fuer $ext"
       PHP_CONFIG="$php_config" "$phpize" --clean 2>/dev/null || true
       "$phpize" --clean 2>/dev/null || true
+
+      if [ "$ext" = "memcached" ]; then
+        sed -i 's/zend_exception_get_default()/zend_ce_exception/g' php_memcached.c 2>/dev/null || true
+      fi
 
       set +e
       "$phpize" 2>&1 | tee "$ext_log"
