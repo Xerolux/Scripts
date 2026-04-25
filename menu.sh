@@ -147,13 +147,14 @@ menu_setup_dovecot() {
       status "Status anzeigen" \
       list-backups "Backups auflisten" \
       list-packages "Pakete auflisten" \
+      check-updates "Nach Updates suchen" \
       check-config "dovecot -n" \
       uninstall "Custom Pakete entfernen" \
       custom "Eigene Argumente" \
       back "Zurueck" 3>&1 1>&2 2>&3) || break
 
     case "$choice" in
-      package|package-dovecot|package-pigeonhole|install|build-only|backup|status|list-backups|list-packages|check-config|uninstall)
+      package|package-dovecot|package-pigeonhole|install|build-only|backup|status|list-backups|list-packages|check-updates|check-config|uninstall)
         run_with_optional_screen_cmd "setup_dovecot.sh" "$choice"
         ;;
       restore)
@@ -185,6 +186,7 @@ menu_setup_postfix() {
       restore "Restore (optional mit Pfad)" \
       status "Status anzeigen" \
       list-backups "Backups auflisten" \
+      check-updates "Nach Updates suchen" \
       check-config "postfix check" \
       uninstall "Custom Pakete entfernen" \
       verify "Modul-Verifikation" \
@@ -192,7 +194,7 @@ menu_setup_postfix() {
       back "Zurueck" 3>&1 1>&2 2>&3) || break
 
     case "$choice" in
-      package|install|backup|status|list-backups|check-config|uninstall|verify)
+      package|install|backup|status|list-backups|check-updates|check-config|uninstall|verify)
         run_with_optional_screen_cmd "setup_postfix.sh" "$choice"
         ;;
       restore)
@@ -265,6 +267,7 @@ menu_setup_nginx() {
       status "Status anzeigen" \
       list-backups "Backups auflisten" \
       list-modules "Verfuegbare Module" \
+      check-updates "Nach Updates suchen" \
       check-config "nginx -t" \
       uninstall "Custom Pakete entfernen" \
       verify "Verifikation" \
@@ -272,7 +275,7 @@ menu_setup_nginx() {
       back "Zurueck" 3>&1 1>&2 2>&3) || break
 
     case "$choice" in
-      package|install|backup|status|list-backups|list-modules|check-config|uninstall|verify)
+      package|install|backup|status|list-backups|list-modules|check-updates|check-config|uninstall|verify)
         run_with_optional_screen_cmd "setup_nginx.sh" "$choice"
         ;;
       restore)

@@ -162,6 +162,7 @@ Befehle:
   list-backups         – Verfügbare Backups auflisten
   list-packages        – Erzeugte .deb-Pakete auflisten
   check-config         – dovecot -n ausführen
+  check-updates       – Verfuegbare Updates pruefen
   uninstall            – Custom-Pakete via dpkg -r entfernen
 
 Deinstallation manuell:
@@ -2161,6 +2162,62 @@ install_all() {
 }
 
 # ------------------------------------------------------------------------------
+# Update-Check: Prueft ob neuere Versionen verfuegbar sind
+# ------------------------------------------------------------------------------
+check_updates() {
+  echo "=============================================="
+  echo " Update-Check"
+  echo "=============================================="
+
+  local dc_upstream=""
+  local ph_upstream=""
+
+  dc_upstream="$(curl -sfL --connect-timeout 10 --max-time 20 \
+    https://api.github.com/repos/dovecot/core/releases/latest 2>/dev/null \
+    | grep -oP '"tag_name":\s*"?v?\K[0-9.]+' | head -1)"
+
+  if [ -z "$dc_upstream" ]; then
+    dc_upstream="$(curl -sfL --connect-timeout 10 --max-time 20 \
+      https://dovecot.org/download.html 2>/dev/null \
+      | grep -oP 'dovecot-\K[0-9]+\.[0-9]+\.[0-9]+' | sort -Vru | head -1)"
+  fi
+
+  ph_upstream="$(curl -sfL --connect-timeout 10 --max-time 20 \
+    https://api.github.com/repos/dovecot/pigeonhole/releases/latest 2>/dev/null \
+    | grep -oP '"tag_name":\s*"?v?\K[0-9.]+' | head -1)"
+
+  printf "\n  %-15s | %-12s | %-12s | %s\n" "Komponente" "Aktuell" "Verfuegbar" "Status"
+  printf "  %s\n" "-------------------------------------------------------"
+
+  local dc_display="${dc_upstream:-?}"
+  local ph_display="${ph_upstream:-?}"
+  local dc_status=""
+  local ph_status=""
+
+  if [ -z "$dc_upstream" ]; then
+    dc_status="[FEHLER]"
+  elif [ "$dc_upstream" = "$DOVECOT_VERSION" ]; then
+    dc_status="[OK]"
+  else
+    dc_status="[UPDATE]"
+  fi
+
+  if [ -z "$ph_upstream" ]; then
+    ph_status="[FEHLER]"
+  elif [ "$ph_upstream" = "$PIGEONHOLE_VERSION" ]; then
+    ph_status="[OK]"
+  else
+    ph_status="[UPDATE]"
+  fi
+
+  printf "  %-15s | %-12s | %-12s | %s\n" "Dovecot" "$DOVECOT_VERSION" "$dc_display" "$dc_status"
+  printf "  %-15s | %-12s | %-12s | %s\n" "Pigeonhole" "$PIGEONHOLE_VERSION" "$ph_display" "$ph_status"
+
+  echo ""
+  echo "Zum Aktualisieren: Version in setup_dovecot.env aendern und './setup_dovecot.sh package' ausfuehren."
+}
+
+# ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
 check_os_arch() {
@@ -2229,9 +2286,10 @@ main() {
     status)         status_cmd ;;
     list-backups)   list_backups ;;
     list-packages)  list_packages ;;
-    check-config)   check_config ;;
-    uninstall)      uninstall_cmd ;;
-    help|-h|--help) usage ;;
+    check-updates)   check_updates ;;
+    check-config)    check_config ;;
+    uninstall)       uninstall_cmd ;;
+    help|-h|--help)  usage ;;
     *)
       usage
       exit 1

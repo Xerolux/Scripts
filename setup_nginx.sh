@@ -387,7 +387,8 @@ Befehle:
   check-config     – nginx -t ausfuehren
   uninstall        – Alle Custom-Pakete via dpkg -r entfernen
   verify           – Modul-Verifikation (nach Installation)
-  list-modules     – Verfügbare Third-Party-Module auflisten
+   list-modules     – Verfügbare Third-Party-Module auflisten
+   check-updates    – Auf neuere Upstream-Versionen prüfen
 
 Deinstallation manuell:
   dpkg -r libnginx-mod-http-brotli libnginx-mod-http-ndk ... nginx-custom
@@ -1884,6 +1885,62 @@ check_os_arch() {
 }
 
 # ------------------------------------------------------------------------------
+# Update-Check: Verfuegbare Upstream-Versionen abrufen
+# ------------------------------------------------------------------------------
+check_updates() {
+  echo ""
+  echo "=============================================="
+  echo " Update-Check"
+  echo "=============================================="
+  echo ""
+
+  local nginx_latest openssl_latest
+
+  nginx_latest=$(curl -sfL --connect-timeout 10 --max-time 20 https://nginx.org/en/download.html 2>/dev/null \
+    | grep -oP 'nginx-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz' \
+    | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' \
+    | sort -Vru | head -1) || true
+
+  openssl_latest=$(curl -sfL --connect-timeout 10 --max-time 20 https://www.openssl.org/source/ 2>/dev/null \
+    | grep -oP 'openssl-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz' \
+    | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' \
+    | sort -Vru | head -1) || true
+
+  printf "%-15s %-15s %-15s %s\n" "Komponente" "Aktuell" "Verfuegbar" "Status"
+  printf "%-15s %-15s %-15s %s\n" "---------------" "---------------" "---------------" "----------"
+
+  local ng_status ng_avail
+  if [ -z "$nginx_latest" ]; then
+    ng_avail="?"
+    ng_status="[FEHLER]"
+  elif [ "$nginx_latest" = "$NGINX_VERSION" ]; then
+    ng_avail="$nginx_latest"
+    ng_status="[OK]"
+  else
+    ng_avail="$nginx_latest"
+    ng_status="[UPDATE]"
+  fi
+  printf "%-15s %-15s %-15s %s\n" "Nginx" "$NGINX_VERSION" "${ng_avail}" "$ng_status"
+
+  local ssl_status ssl_avail
+  if [ -z "$openssl_latest" ]; then
+    ssl_avail="?"
+    ssl_status="[FEHLER]"
+  elif [ "$openssl_latest" = "$OPENSSL_VERSION" ]; then
+    ssl_avail="$openssl_latest"
+    ssl_status="[OK]"
+  else
+    ssl_avail="$openssl_latest"
+    ssl_status="[UPDATE]"
+  fi
+  printf "%-15s %-15s %-15s %s\n" "OpenSSL" "$OPENSSL_VERSION" "${ssl_avail}" "$ssl_status"
+
+  echo ""
+  echo "Zum Aktualisieren: Version in setup_nginx.env aendern und './setup_nginx.sh package' ausfuehren."
+  echo ""
+}
+
+# ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
 main() {
@@ -1920,6 +1977,7 @@ main() {
     check-config)   check_config ;;
     uninstall)      uninstall_cmd ;;
     verify)         verify_build ;;
+    check-updates)  check_updates ;;
     help|-h|--help) usage ;;
     *)
       usage

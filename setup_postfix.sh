@@ -141,6 +141,7 @@ Befehle:
   check-config     – postfix check ausführen
   uninstall        – Custom-Paket via dpkg -r entfernen
   verify           – Modul-Verifikation (nach Installation)
+  check-updates    – Verfuegbare Updates pruefen
 
 Deinstallation manuell:
   dpkg -r postfix-custom
@@ -1349,6 +1350,39 @@ install_all() {
 }
 
 # ------------------------------------------------------------------------------
+# Update-Check
+# ------------------------------------------------------------------------------
+check_updates() {
+  echo "=============================================="
+  echo " Update-Check"
+  echo "=============================================="
+
+  local latest
+  latest="$(curl -sfL --connect-timeout 10 --max-time 20 \
+    https://ftp.gwdg.de/pub/misc/postfix/official/ 2>/dev/null \
+    | grep -oP 'postfix-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz' \
+    | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' \
+    | sort -Vru | head -1)" || true
+
+  local upstream="${latest:-?}"
+  local status
+  if [ "$upstream" = "?" ]; then
+    status="[FEHLER]"
+  elif [ "$upstream" = "$POSTFIX_VERSION" ]; then
+    status="[OK]"
+  else
+    status="[UPDATE]"
+  fi
+
+  printf "%-12s | %-10s | %-10s | %s\n" "Komponente" "Aktuell" "Verfuegbar" "Status"
+  printf "%-12s-+-%-10s-+-%-10s-+-%s\n" "------------" "----------" "----------" "--------"
+  printf "%-12s | %-10s | %-10s | %s\n" "Postfix" "$POSTFIX_VERSION" "$upstream" "$status"
+
+  echo ""
+  echo "Zum Aktualisieren: Version in setup_postfix.env aendern und './setup_postfix.sh package' ausfuehren."
+}
+
+# ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
 check_os_arch() {
@@ -1409,6 +1443,7 @@ main() {
     check-config)   check_config ;;
     uninstall)      uninstall_cmd ;;
     verify)         verify_build ;;
+    check-updates)  check_updates ;;
     help|-h|--help) usage ;;
     *)
       usage
