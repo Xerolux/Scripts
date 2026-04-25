@@ -60,7 +60,8 @@ PHP_MODS_AVAIL="/usr/share/php/${PHP_VER_SHORT}/mods-available"
 # PECL_EXTNAME    – Name der .so Datei (ohne Pfad)
 # ------------------------------------------------------------------------------
 declare -A PECL_GITURL PECL_GITREF PECL_DIRNAME PECL_PKGNAME PECL_DESC \
-           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME PECL_SUBDIR PECL_CMAKE PECL_SUBMODULES
+           PECL_CONFIGURE PECL_ZEND PECL_DEPS PECL_NEEDS PECL_EXTNAME PECL_SUBDIR PECL_CMAKE PECL_SUBMODULES \
+           PECL_MAIN_SHARED
 
 # --- 1. OPcache --------------------------------------------------------------
 PECL_DIRNAME[opcache]="opcache"
@@ -71,6 +72,7 @@ PECL_EXTNAME[opcache]="opcache"
 PECL_DEPS[opcache]="php${PHP_VER_SHORT}-custom"
 PECL_GITURL[opcache]="built-in"
 PECL_CONFIGURE[opcache]=""
+PECL_MAIN_SHARED[opcache]="yes"
 
 # --- 2. APCu -----------------------------------------------------------------
 PECL_DIRNAME[apcu]="apcu"
@@ -632,6 +634,25 @@ PECL_EXTENSIONS=(
 log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE" >&2; }
 die()  { log "FEHLER: $*"; exit 1; }
 
+compute_build_jobs() {
+  local n
+  n="$(nproc 2>/dev/null || echo 4)"
+  n=$(( n > 2 ? n - 2 : 1 ))
+  if [ "${USE_LTO:-no}" = "yes" ]; then
+    local avail_gb
+    avail_gb="$(awk '/MemAvailable/ {printf "%.0f", $2/1048576}' /proc/meminfo 2>/dev/null || echo 4)"
+    local lto_max=$(( avail_gb > 1 ? avail_gb / 2 : 1 ))
+    [ "$n" -gt "$lto_max" ] && n="$lto_max"
+  fi
+  if [ -n "${MAKE_JOBS:-}" ] && [ "$MAKE_JOBS" != "auto" ]; then
+    n="$MAKE_JOBS"
+  fi
+  [ "$n" -lt 1 ] && n=1
+  echo "$n"
+}
+
+BUILD_JOBS=$(compute_build_jobs)
+
 require_root() {
   [ "$EUID" -eq 0 ] || die "Bitte als root ausfuehren."
 }
@@ -673,6 +694,11 @@ Befehle:
   check-config     – php -m + php-fpm -t ausfuehren
   uninstall        – Alle Custom-Pakete via dpkg -r entfernen
   verify           – Modul-Verifikation (nach Installation)
+  pecl-only ext1 ext2 ...
+                   – Nur angegebene PECL-Extensions bauen und verpacken
+  clean {stage|build|packages|pecl|pgo|cache|all}
+                   – Build-Artefakte loeschen
+  list-packages    – Erzeugte .deb-Pakete auflisten
 
 Deinstallation manuell:
   dpkg -r php${PHP_VER_SHORT}-redis php${PHP_VER_SHORT}-imagick ... php${PHP_VER_SHORT}-fpm-custom php${PHP_VER_SHORT}-custom
@@ -1051,26 +1077,69 @@ build_php() {
   local -a conf_args_array=()
   read -r -a conf_args_array <<< "$CONF_ARGS"
 
-  CC_OPT="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2"
+  CC_OPT="-O2 -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3"
+  LD_OPT="-Wl,-z,relro -Wl,-z,now -pie"
+
+  local PGO_ENABLED="${USE_PGO:-yes}"
+  local LTO_ENABLED="${USE_LTO:-yes}"
+
+  if [ "$LTO_ENABLED" = "yes" ]; then
+    CC_OPT="$CC_OPT -flto"
+    LD_OPT="$LD_OPT -flto"
+    log "  [+] LTO aktiviert"
+  fi
 
   log "Fuehre ./configure aus"
   set +e
   ./configure \
     --with-cc-opt="$CC_OPT" \
+    --with-ld-opt="$LD_OPT" \
     "${conf_args_array[@]}" \
     2>&1 | tee -a "$LOG_FILE"
   local conf_rc=${PIPESTATUS[0]}
   set -e
   [ "$conf_rc" -eq 0 ] || die "./configure fehlgeschlagen (Exit $conf_rc)"
 
-  log "Kompiliere PHP (make -j$(nproc))"
-  set +e
-  make -j"$(nproc)" 2>&1 | tee -a "$LOG_FILE"
-  local build_rc=${PIPESTATUS[0]}
-  set -e
-  [ "$build_rc" -eq 0 ] || die "PHP make fehlgeschlagen (Exit $build_rc)"
+  if [ "$PGO_ENABLED" = "yes" ]; then
+    log "PGO: Instrumentiertes Build (Pass 1/2)"
+    set +e
+    make -j"$BUILD_JOBS" PROF_GEN=1 2>&1 | tee -a "$LOG_FILE"
+    local build_rc=${PIPESTATUS[0]}
+    set -e
+    [ "$build_rc" -eq 0 ] || die "PHP PGO Instrumentierungs-Build fehlgeschlagen (Exit $build_rc)"
 
-  log "PHP Build fertig"
+    local PGO_STAGE="/tmp/php-pgo-stage"
+    rm -rf "$PGO_STAGE"
+    mkdir -p "$PGO_STAGE"
+    make INSTALL_ROOT="$PGO_STAGE" install >/dev/null 2>&1
+
+    log "PGO: Profiling-Workload wird ausgefuehrt"
+    local PHP_BIN="$PGO_STAGE/usr/bin/php${PHP_VER_SHORT}"
+    if [ -x "$PHP_BIN" ]; then
+      if [ -f "$BUILD_ROOT/php-${PHP_VERSION}/Zend/bench.php" ]; then
+        "$PHP_BIN" "$BUILD_ROOT/php-${PHP_VERSION}/Zend/bench.php" >/dev/null 2>&1 || true
+      fi
+      "$PHP_BIN" -r 'for($i=0;$i<200;$i++){$a=range(0,10000);shuffle($a);sort($a);array_map(function($x){return $x*2;},$a);json_encode($a);json_decode(json_encode(["k"=>"v","n"=>42]));preg_match("/^[a-z]+$/","hello");md5("test");hash("sha256","test");base64_encode("data");$d=new DateTime();$d->format("Y-m-d H:i:s");}' >/dev/null 2>&1 || true
+    fi
+
+    log "PGO: Optimierter Build (Pass 2/2)"
+    make clean >/dev/null 2>&1
+    set +e
+    make -j"$BUILD_JOBS" PROF_USE=1 2>&1 | tee -a "$LOG_FILE"
+    local build_rc=${PIPESTATUS[0]}
+    set -e
+    [ "$build_rc" -eq 0 ] || die "PHP PGO Optimierungs-Build fehlgeschlagen (Exit $build_rc)"
+    rm -rf "$PGO_STAGE"
+  else
+    log "Kompiliere PHP (make -j$BUILD_JOBS)"
+    set +e
+    make -j"$BUILD_JOBS" 2>&1 | tee -a "$LOG_FILE"
+    local build_rc=${PIPESTATUS[0]}
+    set -e
+    [ "$build_rc" -eq 0 ] || die "PHP make fehlgeschlagen (Exit $build_rc)"
+  fi
+
+  log "PHP Build fertig (PGO=$PGO_ENABLED, LTO=$LTO_ENABLED)"
 }
 
 # ------------------------------------------------------------------------------
@@ -1273,7 +1342,17 @@ DATETIME_SHIM
     log "  Shim: datetime.h erstellt"
   fi
 
+  local -a _pecl_ok=() _pecl_fail=() _pecl_skip=()
+
   for ext in "${PECL_EXTENSIONS[@]}"; do
+    if [ -n "${BUILD_ONLY_EXTS:-}" ]; then
+      local _found=0 _req
+      for _req in $BUILD_ONLY_EXTS; do
+        [ "$ext" = "$_req" ] && { _found=1; break; }
+      done
+      [ "$_found" -eq 0 ] && continue
+    fi
+
     local url="${PECL_GITURL[$ext]}"
     local ext_dir_src="${PECL_DIRNAME[$ext]}"
     local conf="${PECL_CONFIGURE[$ext]}"
@@ -1283,6 +1362,7 @@ DATETIME_SHIM
     local _deb_pattern="php${PHP_VER_SHORT}-${_pkg_name}_*_*.deb"
     if [ "${FORCE_REBUILD:-no}" != "yes" ] && [ -d "$PACKAGE_DIR" ] && compgen -G "$PACKAGE_DIR/$_deb_pattern" >/dev/null 2>&1; then
       log "  [OK] $ext – .deb bereits vorhanden, ueberspringe Build"
+      _pecl_skip+=("$ext")
       continue
     fi
 
@@ -1290,6 +1370,14 @@ DATETIME_SHIM
       local _so_name="${PECL_EXTNAME[$ext]:-$ext}.so"
       if [ -f "$STAGE_PHP$PHP_EXTENSION_DIR/$_so_name" ]; then
         log "  [OK] $ext – bereits als shared im Staging vorhanden"
+        _pecl_skip+=("$ext")
+        continue
+      fi
+
+      if [ "${PECL_MAIN_SHARED[$ext]:-no}" = "yes" ]; then
+        log "  [SKIP] $ext – wird vom Haupt-PHP-Build bereitgestellt (--enable/with-*=shared)"
+        log "         Fuer $ext: FORCE_REBUILD=yes ./setup_php.sh package"
+        _pecl_skip+=("$ext")
         continue
       fi
 
@@ -1299,6 +1387,7 @@ DATETIME_SHIM
         target="$built_in_dir"
       else
         log "  [SKIP] $ext – built-in Quelle nicht gefunden"
+        _pecl_skip+=("$ext")
         continue
       fi
     else
@@ -1309,10 +1398,28 @@ DATETIME_SHIM
       fi
       if [ ! -d "$target" ]; then
         log "  [SKIP] $ext – Quellen nicht gefunden ($target)"
+        _pecl_skip+=("$ext")
         continue
+      fi
+      if [ "${PECL_CMAKE[$ext]:-}" = "yes" ] && [ ! -f "$target/CMakeLists.txt" ]; then
+        log "  [WARN] $ext – CMakeLists.txt fehlt, Verzeichnis unvollstaendig – entferne und lade neu"
+        rm -rf "$target"
+        (
+          cd "$pecl_dir"
+          GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --depth 1 --branch "${PECL_GITREF[$ext]:-master}" "${PECL_GITURL[$ext]}" "$ext_dir_src" 2>&1 | tee -a "$LOG_FILE" || true
+          if [ "${PECL_SUBMODULES[$ext]:-}" = "yes" ] && [ -d "$target/.git" ]; then
+            git -C "$target" submodule update --init --recursive --depth 1 2>&1 | tee -a "$LOG_FILE" || true
+          fi
+        )
+        if [ ! -f "$target/CMakeLists.txt" ]; then
+          log "  [SKIP] $ext – CMakeLists.txt auch nach erneutem Klonen nicht gefunden"
+          _pecl_skip+=("$ext")
+          continue
+        fi
       fi
       if [ ! -f "$target/config.m4" ] && [ "${PECL_CMAKE[$ext]:-}" != "yes" ]; then
         log "  [SKIP] $ext – config.m4 nicht gefunden in $target"
+        _pecl_skip+=("$ext")
         continue
       fi
     fi
@@ -1334,17 +1441,17 @@ DATETIME_SHIM
           -S . -B build 2>&1 | tee "$ext_log"
         local cmakerc=${PIPESTATUS[0]}
         set -e
-        [ "$cmakerc" -eq 0 ] || { log "  [FAIL] cmake fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
+        [ "$cmakerc" -eq 0 ] || { log "  [FAIL] cmake fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 1; }
 
         set +e
         cmake --build build -j"$(nproc)" 2>&1 | tee -a "$ext_log"
         local mkrc=${PIPESTATUS[0]}
         set -e
-        [ "$mkrc" -eq 0 ] || { log "  [FAIL] cmake build fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
+        [ "$mkrc" -eq 0 ] || { log "  [FAIL] cmake build fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 1; }
 
         cmake --install build --prefix /usr DESTDIR="$STAGE_PHP" 2>&1 | tee -a "$ext_log"
         log "  [OK] $ext gebaut und installiert (cmake)"
-      ) || true
+      ) && _pecl_ok+=("$ext") || _pecl_fail+=("$ext")
       continue
     fi
 
@@ -1362,7 +1469,7 @@ DATETIME_SHIM
       "$phpize" 2>&1 | tee "$ext_log"
       local phprc=${PIPESTATUS[0]}
       set -e
-      [ "$phprc" -eq 0 ] || { log "  [FAIL] phpize fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
+      [ "$phprc" -eq 0 ] || { log "  [FAIL] phpize fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 1; }
 
       set +e
       if [ -n "$conf" ]; then
@@ -1374,20 +1481,42 @@ DATETIME_SHIM
       fi
       local confrc=${PIPESTATUS[0]}
       set -e
-      [ "$confrc" -eq 0 ] || { log "  [FAIL] configure fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
+      [ "$confrc" -eq 0 ] || { log "  [FAIL] configure fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 1; }
 
       set +e
-      make -j"$(nproc)" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$ext_log"
+      make -j"$BUILD_JOBS" EXTRA_CFLAGS="$src_inc" 2>&1 | tee -a "$ext_log"
       local mkrc=${PIPESTATUS[0]}
       set -e
-      [ "$mkrc" -eq 0 ] || { log "  [FAIL] make fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 0; }
+      [ "$mkrc" -eq 0 ] || { log "  [FAIL] make fuer $ext fehlgeschlagen (Log: $ext_log)"; exit 1; }
 
       make install INSTALL_ROOT="$STAGE_PHP" 2>&1 | tee -a "$ext_log"
       log "  [OK] $ext gebaut und installiert"
-    ) || true
+    ) && _pecl_ok+=("$ext") || _pecl_fail+=("$ext")
   done
 
-  log "PECL-Extension-Build abgeschlossen"
+  echo ""
+  echo "=============================================="
+  echo " PECL-BUILD ZUSAMMENFASSUNG"
+  echo "=============================================="
+  if [ ${#_pecl_ok[@]} -gt 0 ]; then
+    echo " OK (${#_pecl_ok[@]}): ${_pecl_ok[*]}"
+  fi
+  if [ ${#_pecl_fail[@]} -gt 0 ]; then
+    echo ""
+    echo " FEHLER (${#_pecl_fail[@]}):"
+    for _fe in "${_pecl_fail[@]}"; do
+      echo "   - $_fe  (Log: $pecl_log_dir/${_fe}.log)"
+    done
+    echo ""
+    echo " Neubau versuchen:  ./setup_php.sh pecl-only ${_pecl_fail[*]}"
+  fi
+  if [ ${#_pecl_skip[@]} -gt 0 ]; then
+    echo ""
+    echo " Uebersprungen (${#_pecl_skip[@]}): ${_pecl_skip[*]}"
+  fi
+  echo "=============================================="
+  echo ""
+  log "PECL-Extension-Build abgeschlossen (OK=${#_pecl_ok[@]} Fail=${#_pecl_fail[@]} Skip=${#_pecl_skip[@]})"
 }
 
 # ------------------------------------------------------------------------------
@@ -1768,6 +1897,11 @@ ProtectSystem=full
 PrivateDevices=true
 ProtectHome=true
 LimitCORE=infinity
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
@@ -1825,6 +1959,11 @@ EOF
 pid = /run/php/php${PHP_VER_SHORT}-fpm.pid
 error_log = /var/log/php${PHP_VER_SHORT}-fpm.log
 include=/etc/php/${PHP_VER_SHORT}/fpm/pool.d/*.conf
+log_level = warning
+emergency_restart_threshold = 10
+emergency_restart_interval = 1m
+process_control_timeout = 10s
+systemd_interval = 10
 FPMCONF
 
   cat > "$fpm_stage/usr/share/php/${PHP_VER_SHORT}/custom-defaults/fpm/pool.d/www.conf" <<POOLCONF
@@ -1840,6 +1979,18 @@ pm.start_servers = 5
 pm.min_spare_servers = 3
 pm.max_spare_servers = 10
 pm.max_requests = 1000
+pm.process_idle_timeout = 10s
+pm.status_path = /fpm-status
+ping.path = /fpm-ping
+ping.response = pong
+slowlog = /var/log/php${PHP_VER_SHORT}-fpm-slow.log
+request_slowlog_timeout = 5s
+request_terminate_timeout = 120s
+catch_workers_output = yes
+decorate_workers_output = no
+security.limit_extensions = .php
+listen.mode = 0660
+listen.backlog = 511
 POOLCONF
 
   # Install php-fpm man page
@@ -2026,6 +2177,12 @@ create_all_packages() {
   echo "HINWEIS: /etc/php ist NICHT in den Paketen."
   echo "         Konfiguration wird durch 'backup' / 'restore' verwaltet."
   echo ""
+
+  local _total_debs
+  _total_debs="$(find "$PACKAGE_DIR" -maxdepth 1 -name "*.deb" 2>/dev/null | wc -l)"
+  echo "Gesamt: ${_total_debs} .deb-Pakete in $PACKAGE_DIR"
+  echo ""
+  log "Build abgeschlossen: ${_total_debs} Pakete erstellt"
   local repo_script
   repo_script="$(dirname "$0")/setup_local_repo.sh"
   if [ -x "$repo_script" ]; then
@@ -2439,6 +2596,59 @@ check_os_arch() {
   fi
 }
 
+cmd_pecl_only() {
+  if [ $# -eq 0 ]; then
+    die "pecl-only: Keine Extension angegeben. Usage: $0 pecl-only ext1 ext2 ..."
+  fi
+  log "=== PECL-Only Build: $* ==="
+  if [ ! -d "$STAGE_PHP" ]; then
+    die "Staging nicht gefunden ($STAGE_PHP). Bitte zuerst '$0 package' ausfuehren."
+  fi
+  mkdir -p "$PACKAGE_DIR"
+  BUILD_ONLY_EXTS="$*" build_pecl_extensions
+  create_extension_packages
+  log "=== PECL-Only Build abgeschlossen ==="
+}
+
+cmd_clean() {
+  local target="${1:-help}"
+  log "Clean: $target"
+  case "$target" in
+    stage)    rm -rf "$STAGE_PHP" ;;
+    build)    rm -rf "$BUILD_ROOT/php-${PHP_VERSION}" ;;
+    packages) rm -f "$PACKAGE_DIR"/*.deb "$PACKAGE_DIR"/*.md5sums 2>/dev/null ;;
+    pecl)     rm -rf "$BUILD_ROOT/php-pecl" ;;
+    pgo)      rm -rf /tmp/php-pgo-stage ;;
+    cache)    rm -f "$BUILD_ROOT/php-${PHP_VERSION}.tar.gz" ;;
+    all)
+      rm -rf "$STAGE_PHP"
+      rm -rf "$BUILD_ROOT/php-${PHP_VERSION}"
+      rm -f "$PACKAGE_DIR"/*.deb "$PACKAGE_DIR"/*.md5sums 2>/dev/null
+      rm -rf "$BUILD_ROOT/php-pecl"
+      rm -rf /tmp/php-pgo-stage
+      ;;
+    *)
+      echo "Usage: $0 clean {stage|build|packages|pecl|pgo|cache|all}"
+      return 1
+      ;;
+  esac
+  log "Clean abgeschlossen: $target"
+}
+
+cmd_list_packages() {
+  echo "=============================================="
+  echo " Erzeugte .deb-Pakete ($PACKAGE_DIR)"
+  echo "=============================================="
+  if [ -d "$PACKAGE_DIR" ] && compgen -G "$PACKAGE_DIR/*.deb" >/dev/null 2>&1; then
+    ls -lh "$PACKAGE_DIR"/*.deb
+    echo ""
+    echo "Gesamt: $(ls "$PACKAGE_DIR"/*.deb 2>/dev/null | wc -l) Pakete"
+  else
+    echo "  (keine Pakete vorhanden)"
+  fi
+  echo "=============================================="
+}
+
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
@@ -2476,6 +2686,9 @@ main() {
     check-config)   check_config ;;
     uninstall)      uninstall_cmd ;;
     verify)         verify_build ;;
+    pecl-only)      shift; cmd_pecl_only "$@" ;;
+    clean)          shift; cmd_clean "${1:-all}" ;;
+    list-packages)  cmd_list_packages ;;
     help|-h|--help) usage ;;
     *)
       usage

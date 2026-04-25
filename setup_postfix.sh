@@ -451,7 +451,7 @@ build_ccargs() {
   # --- Sicherheitshärtung (analog zu Debian-Paketen) ------------------------
   CCARGS="$CCARGS -DNO_NIS"
   CCARGS="$CCARGS -DFD_SETSIZE=2048"
-  CCARGS="$CCARGS -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2"
+  CCARGS="$CCARGS -O2 -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=3"
   CCARGS="$CCARGS -Wno-implicit-function-declaration"
   AUXLIBS="$AUXLIBS -Wl,-z,relro -Wl,-z,now"
 
@@ -661,7 +661,7 @@ create_deb_package() {
     # Hardening-Einstellungen in der [Service]-Sektion ergaenzen
     local svc="${STAGE_POSTFIX}/lib/systemd/system/postfix.service"
     if grep -q '\[Service\]' "$svc"; then
-      sed -i '/\[Service\]/a\LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true\nNoNewPrivileges=false' "$svc"
+      sed -i '/\[Service\]/a\LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true\nNoNewPrivileges=false\nPrivateTmp=true\nProtectKernelTunables=true\nProtectControlGroups=true\nRestrictNamespaces=true\nRestrictRealtime=true' "$svc"
       log "Systemd-Unit: Hardening-Einstellungen hinzugefuegt"
     fi
 

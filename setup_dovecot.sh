@@ -448,7 +448,7 @@ build_dovecot() {
   # NICHT GESETZT (bewusst):
   #   --with-cassandra       Nur für sehr große Deployments
   #   --enable-doveadm-http  REST-API, kein Bedarf in dieser Umgebung
-  CFLAGS="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2" \
+  CFLAGS="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3 -O2" \
   LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie" \
   ./configure \
     systemdsystemunitdir=/lib/systemd/system \
@@ -571,7 +571,10 @@ build_pigeonhole() {
   [ -x ./configure ] || die "configure fehlt in $BUILD_ROOT/pigeonhole – Tarball prüfen"
 
   set +e
-  CPPFLAGS="-I${staging_inc}"   LDFLAGS="-L${staging_lib} -L${staging_lib}/dovecot -Wl,-rpath,${staging_lib} -Wl,-rpath,${staging_lib}/dovecot"   ./configure     --with-dovecot="$dovecot_config_dir"     2>&1 | tee -a "$LOG_FILE"
+  CFLAGS="-O2 -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3" \
+  CPPFLAGS="-I${staging_inc}" \
+  LDFLAGS="-L${staging_lib} -L${staging_lib}/dovecot -Wl,-rpath,${staging_lib} -Wl,-rpath,${staging_lib}/dovecot -Wl,-z,relro -Wl,-z,now -pie" \
+  ./configure     --with-dovecot="$dovecot_config_dir"     2>&1 | tee -a "$LOG_FILE"
   local ph_conf_rc=${PIPESTATUS[0]}
   set -e
   [ "$ph_conf_rc" -eq 0 ] || die "Pigeonhole configure fehlgeschlagen (Exit $ph_conf_rc)"
@@ -618,8 +621,9 @@ build_pigeonhole() {
 
   log "Baue Pigeonhole (make -j$(nproc))"
   set +e
+  CFLAGS="-O2 -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3" \
   CPPFLAGS="-I${staging_inc}" \
-  LDFLAGS="-L${staging_lib} -L${staging_lib}/dovecot -Wl,-rpath,${staging_lib} -Wl,-rpath,${staging_lib}/dovecot" \
+  LDFLAGS="-L${staging_lib} -L${staging_lib}/dovecot -Wl,-rpath,${staging_lib} -Wl,-rpath,${staging_lib}/dovecot -Wl,-z,relro -Wl,-z,now -pie" \
   make -j"$(nproc)" \
     2>&1 | tee -a "$LOG_FILE"
   local ph_make_rc=${PIPESTATUS[0]}
@@ -629,8 +633,9 @@ build_pigeonhole() {
   # Vollständige install-Targets
   log "Installiere Pigeonhole ins Staging"
   set +e
+  CFLAGS="-O2 -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3" \
   CPPFLAGS="-I${staging_inc}" \
-  LDFLAGS="-L${staging_lib} -L${staging_lib}/dovecot -Wl,-rpath,${staging_lib} -Wl,-rpath,${staging_lib}/dovecot" \
+  LDFLAGS="-L${staging_lib} -L${staging_lib}/dovecot -Wl,-rpath,${staging_lib} -Wl,-rpath,${staging_lib}/dovecot -Wl,-z,relro -Wl,-z,now -pie" \
   make install DESTDIR="$STAGE_PIGEONHOLE" 2>&1 | tee -a "$LOG_FILE"
   local ph_inst_rc=${PIPESTATUS[0]}
   set -e
@@ -854,7 +859,7 @@ EOF
 
   # Systemd-Hardening: Schutzmechanismen wie offizielle Ubuntu-Pakete
   if [ -f "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service" ]; then
-    sed -i '/^\[Service\]/a LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true' \
+    sed -i '/^\[Service\]/a LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true\nPrivateTmp=true\nProtectKernelTunables=true\nProtectControlGroups=true\nRestrictNamespaces=true\nRestrictRealtime=true' \
       "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service"
     log "Systemd-Hardening angewendet"
   fi
@@ -1708,7 +1713,7 @@ TMPEOF
 
   # Systemd-Hardening: Schutzmechanismen wie offizielle Ubuntu-Pakete
   if [ -f "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service" ]; then
-    sed -i '/^\[Service\]/a LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true' \
+    sed -i '/^\[Service\]/a LimitNOFILE=65535\nProtectSystem=full\nPrivateDevices=true\nProtectHome=true\nPrivateTmp=true\nProtectKernelTunables=true\nProtectControlGroups=true\nRestrictNamespaces=true\nRestrictRealtime=true' \
       "${STAGE_DOVECOT}/lib/systemd/system/dovecot.service"
     log "Systemd-Hardening angewendet"
   fi
