@@ -7,9 +7,11 @@
 #                nginx-custom, php8.5-custom und deren Sub-Pakete
 #
 # Features:
-#   - GPT-signiertes Repository (Release + InRelease)
-#   - GPG-Schluessel-Generierung und -Export
-#   - SHA256-Checksummen
+#   - GPG-signiertes Repository (Release + InRelease, Ed25519)
+#   - SHA256 + SHA512 Checksummen
+#   - Uncompressed + gzip Packages Index
+#   - Automatisches Cleanup alter Paketversionen
+#   - Lock-File gegen parallele Updates
 #   - Paketsignierung (dpkg-sig bevorzugt, debsigs als Fallback)
 # ==============================================================================
 set -Eeuo pipefail
@@ -33,6 +35,8 @@ GPG_KEYRING_DIR="${GPG_KEYRING_DIR:-/root/.gnupg}"
 
 GPG_PUBLIC_KEY="/etc/apt/keyrings/custom-repo.gpg"
 APT_KEYRING_DIR="/etc/apt/keyrings"
+REPO_ARCH="$(dpkg --print-architecture 2>/dev/null || echo arm64)"
+LOCK_FILE="${REPO_DIR:-/var/local/custom-repo}/.repo.lock"
 
 # ------------------------------------------------------------------------------
 # Hilfsfunktionen
@@ -76,11 +80,30 @@ Verwendung:
   setup_local_repo.sh update        – Kopiert neue Pakete, aktualisiert Index + Signatur
   setup_local_repo.sh uninstall     – Entfernt Repo aus apt, loescht Dateien
   setup_local_repo.sh status        – Zeigt Status des Repositories
+  setup_local_repo.sh verify        – Prueft alle Checksummen und Signaturen
+  setup_local_repo.sh cleanup       – Entfernt alte Paketversionen, haelt nur neueste
   setup_local_repo.sh init-gpg      – Erstellt GPG-Schluessel (einmalig)
   setup_local_repo.sh export-key    – Exportiert oeffentlichen Schluessel nach /etc/apt/keyrings/
   setup_local_repo.sh sign-repo     – Signiert Repository neu (Release + InRelease)
   setup_local_repo.sh sign-debs     – Signiert alle .deb-Pakete im Repo (dpkg-sig/debsigs)
 USAGE
+}
+
+# ------------------------------------------------------------------------------
+# Lock-File
+# ------------------------------------------------------------------------------
+acquire_lock() {
+  mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
+  if ! ln -s /proc/self "$LOCK_FILE" 2>/dev/null; then
+    local pid=""
+    [ -L "$LOCK_FILE" ] && pid="$(readlink "$LOCK_FILE" 2>/dev/null | sed 's|/proc/||;s|/self||')"
+    die "Repository ist gesperrt (PID ${pid:-unknown}). Wenn nicht mehr aktiv: rm -f $LOCK_FILE"
+  fi
+  trap 'rm -f "$LOCK_FILE"' EXIT
+}
+
+release_lock() {
+  rm -f "$LOCK_FILE"
 }
 
 # ------------------------------------------------------------------------------
@@ -175,55 +198,61 @@ generate_packages_index() {
   cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
 
   log "Erstelle Packages-Index..."
-  dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9c > Packages.gz
+
+  dpkg-scanpackages -m . /dev/null 2>/dev/null > Packages
+  gzip -9kc Packages > Packages.gz
+
+  local pkg_count
+  pkg_count="$(grep -c '^Package:' Packages 2>/dev/null || echo 0)"
+  log "Packages-Index erstellt: $pkg_count Pakete"
 }
 
 # ------------------------------------------------------------------------------
-# Release-Datei erstellen und signieren
+# Release-Datei erstellen (einmaliger Hash-Durchlauf)
 # ------------------------------------------------------------------------------
 generate_release() {
   cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
 
   log "Erstelle Release-Datei..."
 
+  local now
+  now="$(date -u '+%a, %d %b %Y %H:%M:%S UTC')"
+
   cat > Release <<RELEASEHEAD
 Origin: Custom Build Repository
 Label: Custom Build Repository
 Suite: stable
 Codename: custom
-Architectures: arm64
+Date: $now
+Architectures: $REPO_ARCH
 Components: ./
 Description: Lokales Repository fuer Custom-Build-Pakete
 RELEASEHEAD
 
-  echo "MD5Sum:" >> Release
-  for f in Packages.gz $(ls ./*.deb 2>/dev/null || true); do
+  local md5_sum sha1_sum sha256_sum sha512_sum size
+  local md5_block="" sha1_block="" sha256_block="" sha512_block=""
+
+  for f in Packages Packages.gz $(ls ./*.deb 2>/dev/null || true); do
     [ -f "$f" ] || continue
-    local md5 size
-    md5="$(md5sum "$f" | awk '{print $1}')"
     size="$(stat -c '%s' "$f")"
-    echo " $(printf '%s' "$md5") $(printf '%16s' "$size") $f" >> Release
+
+    md5_sum="$(md5sum "$f" | awk '{print $1}')"
+    sha1_sum="$(sha1sum "$f" | awk '{print $1}')"
+    sha256_sum="$(sha256sum "$f" | awk '{print $1}')"
+    sha512_sum="$(sha512sum "$f" | awk '{print $1}')"
+
+    md5_block+=" ${md5_sum} ${size} ${f}"$'\n'
+    sha1_block+=" ${sha1_sum} ${size} ${f}"$'\n'
+    sha256_block+=" ${sha256_sum} ${size} ${f}"$'\n'
+    sha512_block+=" ${sha512_sum} ${size} ${f}"$'\n'
   done
 
-  echo "SHA1:" >> Release
-  for f in Packages.gz $(ls ./*.deb 2>/dev/null || true); do
-    [ -f "$f" ] || continue
-    local sha1 size
-    sha1="$(sha1sum "$f" | awk '{print $1}')"
-    size="$(stat -c '%s' "$f")"
-    echo " $(printf '%s' "$sha1") $(printf '%16s' "$size") $f" >> Release
-  done
+  printf 'MD5Sum:\n%s' "$md5_block" >> Release
+  printf 'SHA1:\n%s' "$sha1_block" >> Release
+  printf 'SHA256:\n%s' "$sha256_block" >> Release
+  printf 'SHA512:\n%s' "$sha512_block" >> Release
 
-  echo "SHA256:" >> Release
-  for f in Packages.gz $(ls ./*.deb 2>/dev/null || true); do
-    [ -f "$f" ] || continue
-    local sha256 size
-    sha256="$(sha256sum "$f" | awk '{print $1}')"
-    size="$(stat -c '%s' "$f")"
-    echo " $(printf '%s' "$sha256") $(printf '%16s' "$size") $f" >> Release
-  done
-
-  log "Release-Datei erstellt"
+  log "Release-Datei erstellt (Date: $now)"
 }
 
 sign_release() {
@@ -243,6 +272,51 @@ sign_release() {
   gpg_cmd --default-key "$GPG_KEY_ID" --clearsign -o InRelease Release
 
   log "Release.gpg und InRelease erstellt"
+}
+
+# ------------------------------------------------------------------------------
+# Cleanup alte Paketversionen - haelt nur die neueste
+# ------------------------------------------------------------------------------
+cleanup_old_versions() {
+  cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
+
+  log "Bereinige alte Paketversionen..."
+
+  local removed=0
+  declare -A latest_pkg
+
+  for deb in ./*.deb; do
+    [ -f "$deb" ] || continue
+    local pkg_name
+    pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || continue)"
+    local pkg_ver
+    pkg_ver="$(dpkg-deb -f "$deb" Version 2>/dev/null || echo 0)"
+
+    if [ -n "${latest_pkg[$pkg_name]+x}" ]; then
+      local existing_ver existing_file
+      existing_file="${latest_pkg[$pkg_name]}"
+      existing_ver="$(dpkg-deb -f "$existing_file" Version 2>/dev/null || echo 0)"
+
+      if dpkg --compare-versions "$pkg_ver" gt "$existing_ver"; then
+        log "  Entferne alte Version: $(basename "$existing_file") ($existing_ver)"
+        rm -f "$existing_file"
+        latest_pkg[$pkg_name]="$deb"
+        removed=$((removed + 1))
+      else
+        log "  Entferne alte Version: $(basename "$deb") ($pkg_ver)"
+        rm -f "$deb"
+        removed=$((removed + 1))
+      fi
+    else
+      latest_pkg[$pkg_name]="$deb"
+    fi
+  done
+
+  if [ "$removed" -gt 0 ]; then
+    log "Cleanup: $removed alte Version(en) entfernt"
+  else
+    log "Cleanup: Alle Pakete aktuell"
+  fi
 }
 
 # ------------------------------------------------------------------------------
@@ -324,6 +398,7 @@ sign_debs() {
 # Kompletten Repository-Index + Signierung erneuern
 # ------------------------------------------------------------------------------
 rebuild_repo() {
+  cleanup_old_versions
   generate_packages_index
   generate_checksums
   generate_release
@@ -336,7 +411,7 @@ rebuild_repo() {
 update_apt_sources() {
   local list_file="/etc/apt/sources.list.d/local-mail-repo.list"
 
-  if [ -f "$list_file" ]; then cp "$list_file" "${list_file}.bak"; fi
+  [ -f "$list_file" ] && cp "$list_file" "${list_file}.bak"
 
   if [ -f "$GPG_PUBLIC_KEY" ] && detect_gpg_key 2>/dev/null; then
     echo "deb [signed-by=$GPG_PUBLIC_KEY] file:$REPO_DIR ./" > "$list_file"
@@ -348,11 +423,112 @@ update_apt_sources() {
 }
 
 # ------------------------------------------------------------------------------
+# Verify: Checksummen und Signaturen pruefen
+# ------------------------------------------------------------------------------
+verify_repo() {
+  cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
+
+  local errors=0
+
+  echo "=============================================="
+  echo " Repository Verifikation – $(date)"
+  echo "=============================================="
+
+  echo ""
+  echo "1. SHA256SUMS pruefen..."
+  if [ -f SHA256SUMS ]; then
+    if sha256sum -c SHA256SUMS 2>&1 | grep -v ': OK$'; then
+      echo "  [FAIL] SHA256 Fehler gefunden!"
+      errors=$((errors + 1))
+    else
+      local ok_count
+      ok_count="$(sha256sum -c SHA256SUMS 2>&1 | grep -c ': OK$' || echo 0)"
+      echo "  [OK] $ok_count Pakete verifiziert"
+    fi
+  else
+    echo "  [--] Keine SHA256SUMS vorhanden"
+  fi
+
+  echo ""
+  echo "2. Release-Signatur pruefen..."
+  if [ -f InRelease ]; then
+    if gpg_cmd --verify InRelease 2>&1 | grep -q 'Good signature'; then
+      echo "  [OK] InRelease Signatur gueltig (Key: $GPG_KEY_ID)"
+    else
+      gpg_cmd --verify InRelease 2>&1 | tail -2
+      errors=$((errors + 1))
+    fi
+  elif [ -f Release.gpg ] && [ -f Release ]; then
+    if gpg_cmd --verify Release.gpg Release 2>&1 | grep -q 'Good signature'; then
+      echo "  [OK] Release.gpg Signatur gueltig (Key: $GPG_KEY_ID)"
+    else
+      gpg_cmd --verify Release.gpg Release 2>&1 | tail -2
+      errors=$((errors + 1))
+    fi
+  else
+    echo "  [--] Keine signierte Release-Datei vorhanden"
+  fi
+
+  echo ""
+  echo "3. .deb Paket-Signaturen pruefen..."
+  if command -v dpkg-sig >/dev/null 2>&1; then
+    local signed=0 unsigned=0
+    for deb in ./*.deb; do
+      [ -f "$deb" ] || continue
+      if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
+        signed=$((signed + 1))
+      else
+        echo "  [UNSIGNED] $(basename "$deb")"
+        unsigned=$((unsigned + 1))
+      fi
+    done
+    echo "  Signiert: $signed, Unsigniert: $unsigned"
+  else
+    echo "  [--] dpkg-sig nicht installiert"
+  fi
+
+  echo ""
+  echo "4. Packages Index pruefen..."
+  if [ -f Packages ] && [ -f Packages.gz ]; then
+    local pkg_in_index
+    pkg_in_index="$(grep -c '^Package:' Packages 2>/dev/null || echo 0)"
+    local deb_count
+    deb_count="$(ls ./*.deb 2>/dev/null | wc -l)"
+    echo "  Packages Eintraege: $pkg_in_index, .deb Dateien: $deb_count"
+    if [ "$pkg_in_index" -ne "$deb_count" ]; then
+      echo "  [WARN] Diskrepanz zwischen Index und Dateien"
+      errors=$((errors + 1))
+    else
+      echo "  [OK] Index und Dateien konsistent"
+    fi
+
+    if zcat Packages.gz | diff - Packages >/dev/null 2>&1; then
+      echo "  [OK] Packages.gz stimmt mit Packages ueberein"
+    else
+      echo "  [FAIL] Packages.gz weicht von Packages ab"
+      errors=$((errors + 1))
+    fi
+  else
+    echo "  [--] Packages/Packages.gz fehlen"
+    errors=$((errors + 1))
+  fi
+
+  echo ""
+  if [ "$errors" -eq 0 ]; then
+    echo "Ergebnis: Alle Prüfungen bestanden"
+  else
+    echo "Ergebnis: $errors Fehler gefunden"
+  fi
+  echo "=============================================="
+}
+
+# ------------------------------------------------------------------------------
 # Befehle
 # ------------------------------------------------------------------------------
 install_repo() {
   log "=== Starte Installation des lokalen Repositories ==="
 
+  acquire_lock
   mkdir -p "$REPO_DIR"
 
   log "Installiere Abhaengigkeiten..."
@@ -373,7 +549,8 @@ install_repo() {
   else
     log "Keine .deb Pakete zum Kopieren gefunden, erstelle leeres Repository."
     cd "$REPO_DIR" || die "Konnte nicht in $REPO_DIR wechseln"
-    touch Packages.gz
+    touch Packages
+    gzip -9kc Packages > Packages.gz
     generate_release
     sign_release
   fi
@@ -392,6 +569,8 @@ update_repo() {
   if [ ! -d "$REPO_DIR" ]; then
     die "Repository-Verzeichnis $REPO_DIR existiert nicht. Bitte zuerst 'install' ausfuehren."
   fi
+
+  acquire_lock
 
   log "Kopiere neue Pakete..."
   for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR" "$PHP_PKG_DIR"; do
@@ -412,6 +591,8 @@ update_repo() {
 uninstall_repo() {
   log "=== Deinstalliere lokales Repository ==="
   local list_file="/etc/apt/sources.list.d/local-mail-repo.list"
+
+  acquire_lock
 
   [ -f "$list_file" ] && { log "Entferne apt sources list: $list_file"; rm -f "$list_file"; }
   [ -d "$REPO_DIR" ] && { log "Entferne Repository-Verzeichnis: $REPO_DIR"; rm -rf "$REPO_DIR"; }
@@ -450,10 +631,12 @@ status_repo() {
   echo ""
   if [ -d "$REPO_DIR" ]; then
     echo "  [OK] Repository: $REPO_DIR"
-    if [ -f "$REPO_DIR/Release" ]; then echo "  [OK] Release-Datei vorhanden"; fi
-    if [ -f "$REPO_DIR/Release.gpg" ]; then echo "  [OK] Release.gpg (signiert)"; fi
-    if [ -f "$REPO_DIR/InRelease" ]; then echo "  [OK] InRelease (clearsign)"; fi
-    if [ -f "$REPO_DIR/SHA256SUMS" ]; then echo "  [OK] SHA256SUMS vorhanden"; fi
+    [ -f "$REPO_DIR/Packages" ] && echo "  [OK] Packages Index vorhanden"
+    [ -f "$REPO_DIR/Packages.gz" ] && echo "  [OK] Packages.gz vorhanden"
+    [ -f "$REPO_DIR/Release" ] && echo "  [OK] Release-Datei vorhanden"
+    [ -f "$REPO_DIR/Release.gpg" ] && echo "  [OK] Release.gpg (signiert)"
+    [ -f "$REPO_DIR/InRelease" ] && echo "  [OK] InRelease (clearsign)"
+    [ -f "$REPO_DIR/SHA256SUMS" ] && echo "  [OK] SHA256SUMS vorhanden"
 
     echo ""
     echo "  Pakete:"
@@ -480,6 +663,8 @@ main() {
     update)       update_repo ;;
     uninstall)    uninstall_repo ;;
     status)       status_repo ;;
+    verify)       verify_repo ;;
+    cleanup)      cd "$REPO_DIR" || die "Repo nicht gefunden"; cleanup_old_versions; rebuild_repo ;;
     init-gpg)     init_gpg ;;
     export-key)   export_key ;;
     sign-repo)    generate_release; sign_release ;;
