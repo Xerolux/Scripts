@@ -281,8 +281,8 @@ install_build_deps() {
 # Quellen herunterladen
 # ------------------------------------------------------------------------------
 prepare_sources() {
-  mkdir -p "$BUILD_ROOT"
-  cd "$BUILD_ROOT"
+  mkdir -p "$BUILD_ROOT" || die "Kann $BUILD_ROOT nicht erstellen"
+  cd "$BUILD_ROOT" || die "Kann nicht zu $BUILD_ROOT wechseln"
   rm -rf "postfix-${POSTFIX_VERSION}"
 
   local pf_tar

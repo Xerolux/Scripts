@@ -79,11 +79,11 @@ ensure_deps() {
   (( ${#need[@]} == 0 )) && return
   command -v gum >/dev/null 2>&1 && gum style --bold --foreground "$R" -- "Installiere: ${need[*]}" || echo "Installiere: ${need[*]}"
   if ! command -v gum >/dev/null 2>&1; then
-    mkdir -p /etc/apt/keyrings
-    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null
-    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list
+    mkdir -p /etc/apt/keyrings || { echo "Fehler: Kann /etc/apt/keyrings nicht erstellen" >&2; exit 1; }
+    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null || { echo "Fehler: Charm GPG key download fehlgeschlagen" >&2; exit 1; }
+    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list || { echo "Fehler: Kann sources.list.d nicht schreiben" >&2; exit 1; }
   fi
-  apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y gum fzf curl 2>/dev/null
+  apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y gum fzf curl 2>/dev/null || { echo "apt-get install fehlgeschlagen" >&2; exit 1; }
   command -v gum >/dev/null 2>&1 || { echo "gum fehlgeschlagen"; exit 1; }
 }
 

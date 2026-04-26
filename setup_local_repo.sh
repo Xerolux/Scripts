@@ -153,8 +153,9 @@ init_gpg() {
   detect_gpg_key 2>/dev/null && { log "Bereits vorhanden: $GPG_KEY_ID"; return 0; }
 
   apt-get update -qq --allow-releaseinfo-change 2>/dev/null || apt-get update -qq 2>/dev/null || true
-  DEBIAN_FRONTEND=noninteractive apt-get install -y gnupg
-  mkdir -p "$GPG_KEYRING_DIR"; chmod 700 "$GPG_KEYRING_DIR"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y gnupg || die "gnupg installation failed"
+  mkdir -p "$GPG_KEYRING_DIR" || die "Kann $GPG_KEYRING_DIR nicht erstellen"
+  chmod 700 "$GPG_KEYRING_DIR" || die "Kann Permissions nicht ändern"
 
   local batch_file="/tmp/gpg-batch-$$"
   cat > "$batch_file" <<GPGCONF

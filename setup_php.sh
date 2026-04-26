@@ -828,8 +828,8 @@ install_build_deps() {
 # Quellen herunterladen
 # ------------------------------------------------------------------------------
 prepare_sources() {
-  mkdir -p "$BUILD_ROOT"
-  cd "$BUILD_ROOT"
+  mkdir -p "$BUILD_ROOT" || die "Kann $BUILD_ROOT nicht erstellen"
+  cd "$BUILD_ROOT" || die "Kann nicht zu $BUILD_ROOT wechseln"
   rm -rf "php-${PHP_VERSION}"
 
   local php_tar="$BUILD_ROOT/php-${PHP_VERSION}.tar.gz"
