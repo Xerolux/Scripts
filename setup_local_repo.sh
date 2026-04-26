@@ -24,6 +24,9 @@
 # ==============================================================================
 set -Eeuo pipefail
 
+# Cleanup on exit/error
+trap 'rm -f /tmp/repo-batch-*$$* 2>/dev/null' EXIT INT TERM
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -f "$SCRIPT_DIR/setup_local_repo.env" ]] && [[ -f "$SCRIPT_DIR/setup_local_repo.env.example" ]]; then

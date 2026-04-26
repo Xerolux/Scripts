@@ -541,7 +541,7 @@ menu_php() {
   local ver pkg_count=0
   ver="$(get_env_var setup_php.env PHP_VER_SHORT)"
   source "$SCRIPT_DIR/setup_php.env" 2>/dev/null || true
-  [ -d "${PACKAGE_DIR:-/root/php-packages}" ] && pkg_count="$(ls "${PACKAGE_DIR:-/root/php-packages}"/*.deb 2>/dev/null | wc -l)"
+  [ -d "${PACKAGE_DIR:-/root/php-packages}" ] && pkg_count="$(find "${PACKAGE_DIR:-/root/php-packages}" -maxdepth 1 -name '*.deb' -type f 2>/dev/null | wc -l)"
 
   while true; do
     clear; draw_header "PHP ${ver:-}" "$(_col "$P" "$pkg_count") Pakete"; echo

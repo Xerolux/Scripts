@@ -29,6 +29,9 @@
 # ==============================================================================
 set -Eeuo pipefail
 
+# Cleanup on exit/error
+trap 'rm -f /tmp/nginx-build-$$* 2>/dev/null' EXIT INT TERM
+
 if [[ ! -f "setup_nginx.env" ]]; then
   echo "FEHLER: setup_nginx.env nicht gefunden. Bitte aus setup_nginx.env.example erstellen." >&2
   exit 1

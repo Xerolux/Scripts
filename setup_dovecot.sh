@@ -16,6 +16,9 @@
 # ==============================================================================
 set -Eeuo pipefail
 
+# Cleanup on exit/error
+trap 'rm -f /tmp/dovecot-build-$$* 2>/dev/null' EXIT INT TERM
+
 if [[ ! -f "setup_dovecot.env" ]]; then
   echo "FEHLER: setup_dovecot.env nicht gefunden. Bitte aus setup_dovecot.env.example erstellen." >&2
   exit 1

@@ -21,6 +21,9 @@
 # ==============================================================================
 set -Eeuo pipefail
 
+# Cleanup on exit/error
+trap 'rm -f /tmp/postfix-build-$$* 2>/dev/null' EXIT INT TERM
+
 if [[ ! -f "setup_postfix.env" ]]; then
   echo "FEHLER: setup_postfix.env nicht gefunden. Bitte aus setup_postfix.env.example erstellen." >&2
   exit 1
