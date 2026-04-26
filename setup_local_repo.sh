@@ -33,7 +33,7 @@ GPG_KEY_NAME="${GPG_KEY_NAME:-Custom Build Repo}"
 GPG_KEY_EMAIL="${GPG_KEY_EMAIL:-root@localhost}"
 GPG_KEYRING_DIR="${GPG_KEYRING_DIR:-/root/.gnupg}"
 
-GPG_PUBLIC_KEY="/etc/apt/keyrings/custom-repo.gpg"
+GPG_PUBLIC_KEY="/etc/apt/keyrings/xerolux-repo.gpg"
 APT_KEYRING_DIR="/etc/apt/keyrings"
 REPO_ARCH="$(dpkg --print-architecture 2>/dev/null || echo arm64)"
 LOCK_FILE="${REPO_DIR:-/var/local/custom-repo}/.repo.lock"
