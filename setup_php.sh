@@ -128,7 +128,7 @@ PECL_EXTNAME[mongodb]="mongodb"
 PECL_ZEND[mongodb]="no"
 PECL_DEPS[mongodb]="php${PHP_VER_SHORT}-custom"
 PECL_CONFIGURE[mongodb]=""
-PECL_CMAKE[mongodb]="yes"
+PECL_CMAKE[mongodb]="no"
 PECL_SUBMODULES[mongodb]="yes"
 
 # --- 7. AMQP -----------------------------------------------------------------
