@@ -212,6 +212,26 @@ ask_screen()  {
 
 # ===================== RUNNERS =====================
 
+is_build_script() {
+  case "$1" in
+    setup_php.sh|setup_nginx.sh|setup_dovecot.sh|setup_postfix.sh) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+auto_repo_sync() {
+  local envf="$SCRIPT_DIR/setup_local_repo.env"
+  [ -f "$envf" ] || return 0
+  source "$envf"
+  [ -d "${REPO_DIR:-}" ] || return 0
+  [ -f "$SCRIPT_DIR/setup_local_repo.sh" ] || return 0
+
+  echo
+  if ask_confirm "Pakete ins Repo synchronisieren?"; then
+    bash "$SCRIPT_DIR/setup_local_repo.sh" update 2>&1 | tail -5
+  fi
+}
+
 run_script() {
   local script="$1"; shift
   local path="$SCRIPT_DIR/$script"
@@ -224,6 +244,7 @@ run_script() {
   echo
   if [ "$rc" -eq 0 ]; then
     _ok "✔ Fertig (OK)"
+    is_build_script "$script" && auto_repo_sync
   else
     _fail "✘ Fertig (Exit: $rc)"
   fi
@@ -263,12 +284,15 @@ run_in_screen() {
 
   local args_str="" a
   for a in "$@"; do args_str+=" '${a//\'/\'\\\'\'}'"; done
+  local sync_cmd=""
+  is_build_script "$script" && sync_cmd="echo ''; echo 'Repo-Sync: $SCRIPT_DIR/setup_local_repo.sh update'; echo ''"
   screen -dmS "$sname" bash -c "
     set -o pipefail
     export FORCE_REBUILD='${FORCE_REBUILD}' USE_PGO='${USE_PGO}' USE_LTO='${USE_LTO}'
     bash '${path}'${args_str} ${log_redirect}
     _rc=\$?
     echo ''; echo '=== Fertig (rc='\$_rc') ==='; echo 'Strg+A D = Trennen'; echo ''
+    ${sync_cmd}
     if [ \$_rc -eq 0 ]; then echo '✔ Build erfolgreich - Session schliesst in 30s'; else echo '✘ Build fehlgeschlagen (rc='\$_rc') - Session bleibt offen'; read -r _; fi
     sleep 30
   "
@@ -679,21 +703,27 @@ repo_info() {
   [ -f "$envf" ] && source "$envf"
   repo_dir="${REPO_DIR:-/var/local/custom-repo}"
 
-  local deb_count=0 disk="" signed="nein" apt_ok="--" gpg_s="--"
-  if [ -d "$repo_dir" ]; then
-    deb_count="$(find "$repo_dir" -maxdepth 1 -name '*.deb' 2>/dev/null | wc -l)"
-    disk="$(du -sh "$repo_dir" 2>/dev/null | cut -f1)"
-    [ -f "$repo_dir/InRelease" ] && signed="ja"
+  local t_dir="$repo_dir/testing" s_dir="$repo_dir/stable"
+  local t_count=0 s_count=0 disk="" t_signed="nein" s_signed="nein" apt_ok="--" gpg_s="--"
+  if [ -d "$t_dir" ]; then
+    t_count="$(ls "$t_dir"/*.deb 2>/dev/null | wc -l)"
+    [ -f "$t_dir/InRelease" ] && t_signed="ja"
   fi
-  [ -f /etc/apt/sources.list.d/local-mail-repo.list ] && apt_ok="$(grep -c '^deb ' /etc/apt/sources.list.d/local-mail-repo.list 2>/dev/null || echo 0)" && apt_ok="$((apt_ok > 0))"
-  [ -f /etc/apt/keyrings/custom-repo.gpg ] && gpg_s="ja"
+  if [ -d "$s_dir" ]; then
+    s_count="$(ls "$s_dir"/*.deb 2>/dev/null | wc -l)"
+    [ -f "$s_dir/InRelease" ] && s_signed="ja"
+  fi
+  [ -d "$repo_dir" ] && disk="$(du -sh "$repo_dir" 2>/dev/null | cut -f1)"
+  [ -f /etc/apt/sources.list.d/xerolux-repo.list ] && apt_ok="1" || apt_ok="0"
+  [ -f /etc/apt/keyrings/xerolux-repo.gpg ] && gpg_s="ja"
 
-  local s_c a_c g_c
-  [ "$signed" = "ja" ] && s_c="$G" || s_c="$GR"
+  local t_c s_c a_c g_c
+  [ "$t_signed" = "ja" ] && t_c="$G" || t_c="$GR"
+  [ "$s_signed" = "ja" ] && s_c="$G" || s_c="$GR"
   [ "$apt_ok" = "1" ] && a_c="$G" || a_c="$GR"
   [ "$gpg_s" = "ja" ] && g_c="$G" || g_c="$GR"
 
-  echo "$(_col "$P" "$deb_count") Pakete  $(_dim "|")  ${disk:---}  $(_dim "|")  Signiert: $(_col "$s_c" "$signed")  $(_dim "|")  GPG: $(_col "$g_c" "$gpg_s")  $(_dim "|")  apt: $(_col "$a_c" "${apt_ok:-0}")"
+  echo "$(_col "$P" "$s_count") stable  $(_col "$Y" "$t_count") testing  $(_dim "|")  ${disk:---}  $(_dim "|")  GPG: $(_col "$g_c" "$gpg_s")  $(_dim "|")  apt: $(_col "$a_c" "${apt_ok:-0}")"
 }
 
 repo_browse() {
@@ -701,13 +731,17 @@ repo_browse() {
   [ -f "$envf" ] && source "$envf"
   repo_dir="${REPO_DIR:-/var/local/custom-repo}"
 
-  if [ ! -d "$repo_dir" ] || ! ls "$repo_dir"/*.deb >/dev/null 2>&1; then
-    _dim "Keine Pakete im Repository."; read -r -p " Enter..." _; return
+  local suite_sel
+  suite_sel=$(choose "Kanal:" "stable" "testing") || return
+  local browse_dir="$repo_dir/$suite_sel"
+
+  if [ ! -d "$browse_dir" ] || ! ls "$browse_dir"/*.deb >/dev/null 2>&1; then
+    _dim "Keine Pakete in $suite_sel."; read -r -p " Enter..." _; return
   fi
 
   local -a items=()
   local deb pkg_size inst_ver="" inst_state
-  for deb in "$repo_dir"/*.deb; do
+  for deb in "$browse_dir"/*.deb; do
     [ -f "$deb" ] || continue
     pkg_size="$(du -h "$deb" | cut -f1)"
     local pkg_name="" pkg_ver=""
@@ -726,7 +760,7 @@ repo_browse() {
     items+=("${pkg_name:-$(basename "$deb")}  ${pkg_ver:---}  ${pkg_size}  ${inst_state}")
   done
 
-  clear; draw_header "Repo: Pakete durchsuchen"; echo
+  clear; draw_header "Repo: $suite_sel durchsuchen"; echo
   local sel
   sel=$(printf '%s\n' "${items[@]}" | fzf \
     --header="Paket                Version       Size   Status" \
@@ -736,8 +770,8 @@ repo_browse() {
   [ -z "$sel" ] && return
   local pkg="${sel%% *}"
 
-  clear; draw_header "Paket: $pkg"; echo
-  local deb_path; deb_path="$(find "$repo_dir" -maxdepth 1 -name "${pkg}_*.deb" | head -1)"
+  clear; draw_header "Paket: $pkg ($suite_sel)"; echo
+  local deb_path; deb_path="$(find "$browse_dir" -maxdepth 1 -name "${pkg}_*.deb" | head -1)"
   if [ -n "$deb_path" ]; then
     draw_box "Metadaten" "$C" "$(dpkg-deb -I "$deb_path" 2>/dev/null)"
     echo
@@ -751,14 +785,15 @@ repo_install_select() {
   local envf="$SCRIPT_DIR/setup_local_repo.env" repo_dir=""
   [ -f "$envf" ] && source "$envf"
   repo_dir="${REPO_DIR:-/var/local/custom-repo}"
+  local install_dir="$repo_dir/stable"
 
-  if [ ! -d "$repo_dir" ] || ! ls "$repo_dir"/*.deb >/dev/null 2>&1; then
-    _dim "Keine Pakete."; read -r -p " Enter..." _; return
+  if [ ! -d "$install_dir" ] || ! ls "$install_dir"/*.deb >/dev/null 2>&1; then
+    _dim "Keine Pakete in stable/."; read -r -p " Enter..." _; return
   fi
 
   local -a items=()
   local deb pkg_name inst_ver
-  for deb in "$repo_dir"/*.deb; do
+  for deb in "$install_dir"/*.deb; do
     [ -f "$deb" ] || continue
     pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || basename "$deb")"
     inst_ver="$(dpkg-query -W -f '${Version}' "$pkg_name" 2>/dev/null || true)"
@@ -769,7 +804,7 @@ repo_install_select() {
     fi
   done
 
-  clear; draw_header "Pakete installieren"; echo
+  clear; draw_header "Pakete installieren (stable)"; echo
   local choices
   choices=$(printf '%s\n' "${items[@]}" | fzf --multi \
     --header="Tab = auswaehlen | Enter = installieren | ESC = abbrechen" \
@@ -796,6 +831,7 @@ repo_sync() {
   local envf="$SCRIPT_DIR/setup_local_repo.env"
   [ -f "$envf" ] && source "$envf"
   local repo_dir="${REPO_DIR:-/var/local/custom-repo}"
+  local testing_dir="$repo_dir/testing"
   local -a pkg_dirs=()
   local d
   for d in "${DOVECOT_PKG_DIR:-}" "${POSTFIX_PKG_DIR:-}" "${NGINX_PKG_DIR:-}" "${PHP_PKG_DIR:-}"; do
@@ -813,7 +849,9 @@ repo_sync() {
     fi
     local new=0
     for deb in "$d"/*.deb; do
-      [ -f "$deb" ] && [ ! -f "$repo_dir/$(basename "$deb")" ] && new=$((new + 1))
+      [ -f "$deb" ] || continue
+      local bn; bn="$(basename "$deb")"
+      [ -f "$testing_dir/$bn" ] || [ -f "$repo_dir/stable/$bn" ] || new=$((new + 1))
     done
     if [ "$new" -gt 0 ]; then
       lines+="$(_ok "✔ $label: $new neu")${nl}"
@@ -828,7 +866,7 @@ repo_sync() {
     read -r -p " Enter..." _; return
   fi
 
-  draw_box "Sync: $total_new neu" "$Y" "$lines"
+  draw_box "Sync: $total_new neu → testing/" "$Y" "$lines"
   ask_confirm "Synchronisieren + Index aktualisieren?" || return
   run_script "setup_local_repo.sh" update
 }
@@ -843,7 +881,20 @@ menu_localrepo() {
       "Pakete durchsuchen" \
       "Pakete installieren" \
       "$(sep)" \
+      "testing→stable promote" \
+      "Alle testing→stable erzwingen" \
+      "Auto-promote (Cron)" \
+      "Rollback (stable→testing)" \
+      "Diff testing vs stable" \
+      "$(sep)" \
       "Status (Detail)" \
+      "Verifikation" \
+      "Health-Check" \
+      "Download-Statistiken" \
+      "Cleanup alte Versionen" \
+      "$(sep)" \
+      "apt Pinning einrichten" \
+      "Migration (flat→testing/stable)" \
       "GPG Schluessel erzeugen" \
       "Public Key exportieren" \
       "Release neu signieren" \
@@ -856,7 +907,18 @@ menu_localrepo() {
       "durchsuchen"*)      repo_browse ;;
       "installieren"*)     repo_install_select ;;
       *"──"*)              continue ;;
+      "testing"*)          run_script "setup_local_repo.sh" promote ;;
+      "Alle testing"*)     ask_confirm "Alle testing→stable erzwingen?" && run_script "setup_local_repo.sh" promote-all ;;
+      "Auto-promote"*)     run_script "setup_local_repo.sh" auto-promote ;;
+      "Rollback"*)         local pat; pat="$(gum input --placeholder='Paket-Filter (leer=alle)')" || continue; run_script "setup_local_repo.sh" demote "$pat" ;;
+      "Diff"*)             run_script "setup_local_repo.sh" diff ;;
       "Status"*)           run_script "setup_local_repo.sh" status ;;
+      "Verifikation"*)     run_script "setup_local_repo.sh" verify ;;
+      "Health"*)           run_script "setup_local_repo.sh" health-check ;;
+      "Download"*)         run_script "setup_local_repo.sh" stats ;;
+      "Cleanup"*)          ask_confirm "Alte Versionen entfernen?" && run_script "setup_local_repo.sh" cleanup ;;
+      "Pinning"*)          run_script "setup_local_repo.sh" setup-pinning ;;
+      "Migration"*)        ask_confirm "Flat-Repo nach testing/stable migrieren?" && run_script "setup_local_repo.sh" migrate ;;
       "GPG"*)              run_script "setup_local_repo.sh" init-gpg ;;
       "Public"*)           run_script "setup_local_repo.sh" export-key ;;
       "Release"*)          run_script "setup_local_repo.sh" sign-repo ;;
