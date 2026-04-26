@@ -1383,7 +1383,12 @@ DATETIME_SHIM
       local built_in_dir="$src_dir/ext/${ext_dir_src}"
 
       if [ -d "$built_in_dir" ] && [ -f "$built_in_dir/config.m4" ]; then
-        target="$built_in_dir"
+        local pecl_copy="$pecl_dir/$ext_dir_src"
+        if [ ! -d "$pecl_copy" ] || [ ! -f "$pecl_copy/config.m4" ]; then
+          rm -rf "$pecl_copy"
+          cp -a "$built_in_dir" "$pecl_copy"
+        fi
+        target="$pecl_copy"
       else
         log "  [SKIP] $ext – built-in Quelle nicht gefunden"
         _pecl_skip+=("$ext")
