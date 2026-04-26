@@ -383,7 +383,7 @@ menu_screens() {
           local lp; lp="$(get_log_for_screen "$sn_found")"
           clear; _dim "=== $lp === (Strg+C = zurueck)"; tail -f "$lp"
         fi ;;
-      *"────"*) continue ;;
+      *"──"*) continue ;;
       *)
         local match_idx=-1
         local i=0
@@ -560,13 +560,13 @@ menu_nginx() {
       "Pakete bauen" \
       "Installieren" \
       "Status" \
-      "$(_dim "─ Details ─")" \
+      "$(sep)" \
       "Module auflisten" \
       "Backups auflisten" \
       "Nach Updates suchen" \
       "Konfiguration pruefen" \
       "Verifikation" \
-      "$(_dim "─ Backup ─")" \
+      "$(sep)" \
       "Backup erstellen" \
       "Backup wiederherstellen" \
       "Deinstallieren" \
@@ -575,13 +575,12 @@ menu_nginx() {
       "Pakete"*)      run_build "setup_nginx.sh" "nginx_build" package ;;
       "Installieren"*) run_script "setup_nginx.sh" install ;;
       "Status"*)      run_script "setup_nginx.sh" status ;;
-      *"────"*) continue ;;
+      *"──"*)         continue ;;
       "Module"*)      run_script "setup_nginx.sh" list-modules ;;
       "Backups"*)     run_script "setup_nginx.sh" list-backups ;;
       "Updates"*)     run_script "setup_nginx.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_nginx.sh" check-config ;;
       "Verifikation"*) run_script "setup_nginx.sh" verify ;;
-      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_nginx.sh" backup ;;
       "wiederher"*)   do_restore "setup_nginx.sh" "nginx_build" restore ;;
       "Deinstall"*)   run_script "setup_nginx.sh" uninstall ;;
@@ -600,14 +599,14 @@ menu_dovecot() {
       "Nur Dovecot-Core" \
       "Nur Pigeonhole" \
       "Nur kompilieren" \
-      "$(_dim "─ Verwaltung ─")" \
+      "$(sep)" \
       "Installieren" \
       "Status" \
       "Backups auflisten" \
       "Pakete auflisten" \
       "Nach Updates suchen" \
       "Konfiguration pruefen" \
-      "$(_dim "─ Backup ─")" \
+      "$(sep)" \
       "Backup erstellen" \
       "Backup wiederherstellen" \
       "Deinstallieren" \
@@ -617,14 +616,13 @@ menu_dovecot() {
       "Nur Dovecot"*) run_build "setup_dovecot.sh" "dovecot_build" package-dovecot ;;
       "Nur Pig"*)     run_build "setup_dovecot.sh" "dovecot_build" package-pigeonhole ;;
       "Nur komp"*)    run_build "setup_dovecot.sh" "dovecot_build" build-only ;;
-      *"────"*) continue ;;
+      *"──"*)         continue ;;
       "Installieren"*) run_script "setup_dovecot.sh" install ;;
       "Status"*)      run_script "setup_dovecot.sh" status ;;
       "Backups"*)     run_script "setup_dovecot.sh" list-backups ;;
       "Pakete"*)      run_script "setup_dovecot.sh" list-packages ;;
       "Updates"*)     run_script "setup_dovecot.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_dovecot.sh" check-config ;;
-      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_dovecot.sh" backup ;;
       "wiederher"*)   do_restore "setup_dovecot.sh" "dovecot_build" restore ;;
       "Deinstall"*)   run_script "setup_dovecot.sh" uninstall ;;
@@ -643,12 +641,12 @@ menu_postfix() {
       "Pakete bauen" \
       "Installieren" \
       "Status" \
-      "$(_dim "─ Details ─")" \
+      "$(sep)" \
       "Backups auflisten" \
       "Nach Updates suchen" \
       "Konfiguration pruefen" \
       "Verifikation" \
-      "$(_dim "─ Backup ─")" \
+      "$(sep)" \
       "Backup erstellen" \
       "Backup wiederherstellen" \
       "Deinstallieren" \
@@ -657,12 +655,11 @@ menu_postfix() {
       "Pakete"*)      run_build "setup_postfix.sh" "postfix_build" package ;;
       "Installieren"*) run_script "setup_postfix.sh" install ;;
       "Status"*)      run_script "setup_postfix.sh" status ;;
-      *"────"*) continue ;;
+      *"──"*)         continue ;;
       "Backups"*)     run_script "setup_postfix.sh" list-backups ;;
       "Updates"*)     run_script "setup_postfix.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_postfix.sh" check-config ;;
       "Verifikation"*) run_script "setup_postfix.sh" verify ;;
-      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_postfix.sh" backup ;;
       "wiederher"*)   do_restore "setup_postfix.sh" "postfix_build" restore ;;
       "Deinstall"*)   run_script "setup_postfix.sh" uninstall ;;
@@ -849,10 +846,10 @@ menu_localrepo() {
     local choice
     choice=$(choose_or_back "" \
       "Repo einrichten" \
-      "$(_ok "Pakete synchronisieren")" \
+      "Pakete synchronisieren" \
       "Pakete durchsuchen" \
       "Pakete installieren" \
-      "$(_dim "─ Verwaltung ─")" \
+      "$(sep)" \
       "Status (Detail)" \
       "GPG Schluessel erzeugen" \
       "Public Key exportieren" \
@@ -865,7 +862,7 @@ menu_localrepo() {
       "synchronisieren"*)  repo_sync ;;
       "durchsuchen"*)      repo_browse ;;
       "installieren"*)     repo_install_select ;;
-      *"────"*) continue ;;
+      *"──"*)              continue ;;
       "Status"*)           run_script "setup_local_repo.sh" status ;;
       "GPG"*)              run_script "setup_local_repo.sh" init-gpg ;;
       "Public"*)           run_script "setup_local_repo.sh" export-key ;;
@@ -889,12 +886,12 @@ menu_backuprestore() {
       "Nur Postfix" \
       "Nur Dovecot" \
       "Nur Nginx" \
-      "$(_dim "─ Restore ─")" \
+      "$(sep)" \
       "Full Restore" \
       "Postfix Restore" \
       "Dovecot Restore" \
       "Nginx Restore" \
-      "$(_dim "─ Aktionen ─")" \
+      "$(sep)" \
       "Backups auflisten" \
       "Backup verifizieren" \
       "Eigene Argumente...")
@@ -903,12 +900,11 @@ menu_backuprestore() {
       "Nur Post"*) run_script "setup_backup_restore.sh" backup-postfix ;;
       "Nur Dove"*) run_script "setup_backup_restore.sh" backup-dovecot ;;
       "Nur Ngin"*) run_script "setup_backup_restore.sh" backup-nginx ;;
-      *"────"*) continue ;;
+      *"──"*)      continue ;;
       "Full R"*)   do_restore "setup_backup_restore.sh" "-" restore ;;
       "Postfix R"*) do_restore "setup_backup_restore.sh" "-" restore-postfix ;;
       "Dovecot R"*) do_restore "setup_backup_restore.sh" "-" restore-dovecot ;;
       "Nginx R"*)  do_restore "setup_backup_restore.sh" "-" restore-nginx ;;
-      *"────"*) continue ;;
       "auflisten"*) run_script "setup_backup_restore.sh" list ;;
       "verifizieren"*) do_restore "setup_backup_restore.sh" "-" verify ;;
       "Eigene"*)   do_custom_args "setup_backup_restore.sh" ;;
@@ -1096,7 +1092,7 @@ main_menu() {
 
     local sc; sc="$(screen_count)"
     local screen_label="Screens"
-    [ "$sc" -gt 0 ] && screen_label="Screens ($(_warn "$sc aktiv"))"
+    [ "$sc" -gt 0 ] && screen_label="Screens ($sc aktiv)"
 
     local choice
     choice=$(choose "" \
