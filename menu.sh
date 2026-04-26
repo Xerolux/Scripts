@@ -207,11 +207,7 @@ choose_or_back() { choose "$@" "Zurueck" || echo "Zurueck"; }
 ask_path()    { gum input --placeholder="Pfad (leer = latest)" 3>/dev/null || echo ""; }
 ask_confirm() { local msg="$1"; shift; gum confirm "$msg" "$@" 2>/dev/null; }
 ask_screen()  {
-  local nl=$'\n'
-  gum style --border rounded --padding "0 1" --foreground "$Y" -- \
-    "▶ Build starten${nl}${nl}$(gum style --foreground "$G" --bold -- "Screen")  =  im Hintergrund${nl}$(gum style --foreground "$C" --bold -- "Vordergrund")  =  direkt sehen" > /dev/tty
-  echo "" > /dev/tty
-  gum confirm "" --affirmative="Screen" --negative="Vordergrund" 2>/dev/null
+  gum confirm "Build im Screen starten?" --affirmative="Screen (Hintergrund)" --negative="Vordergrund (direkt)"
 }
 
 # ===================== RUNNERS =====================
@@ -268,11 +264,12 @@ run_in_screen() {
   local args_str="" a
   for a in "$@"; do args_str+=" '${a//\'/\'\\\'\'}'"; done
   screen -dmS "$sname" bash -c "
+    set -o pipefail
     export FORCE_REBUILD='${FORCE_REBUILD}' USE_PGO='${USE_PGO}' USE_LTO='${USE_LTO}'
     bash '${path}'${args_str} ${log_redirect}
     _rc=\$?
-    echo ''; echo '=== Fertig ==='; echo 'Strg+A D = Trennen'; echo ''
-    if [ \$_rc -eq 0 ]; then echo '✔ Build erfolgreich - Session schliesst in 30s'; else echo '✘ Build fehlgeschlagen - Session bleibt offen'; read -r _; fi
+    echo ''; echo '=== Fertig (rc='\$_rc') ==='; echo 'Strg+A D = Trennen'; echo ''
+    if [ \$_rc -eq 0 ]; then echo '✔ Build erfolgreich - Session schliesst in 30s'; else echo '✘ Build fehlgeschlagen (rc='\$_rc') - Session bleibt offen'; read -r _; fi
     sleep 30
   "
 
@@ -448,18 +445,12 @@ menu_php_ext_select() {
   local ver="${PHP_VER_SHORT:-8.5}"
 
   local -a ext_names=()
-  eval "$(awk '/^PECL_EXTENSIONS=\(/,/\)/' "$SCRIPT_DIR/setup_php.sh" 2>/dev/null | head -60)"
-  for e in "${PECL_EXTENSIONS[@]:-}"; do ext_names+=("$e"); done
+  while IFS= read -r ext; do
+    [ -n "$ext" ] && ext_names+=("$ext")
+  done < <(awk '/^PECL_EXTENSIONS=\(/,/\)/' "$SCRIPT_DIR/setup_php.sh" 2>/dev/null \
+    | grep -oE '^[[:space:]]+[a-z][a-z0-9_-]*' | sed 's/^[[:space:]]*//')
 
-  if [ ${#ext_names[@]} -eq 0 ]; then
-    ext_names=()
-    while IFS= read -r line; do
-      local name="$(echo "$line" | xargs)"
-      [ -n "$name" ] && ext_names+=("$name")
-    done < <(awk '/^PECL_EXTENSIONS=\(/,/\)/' "$SCRIPT_DIR/setup_php.sh" | grep -oP '^\s+\K[a-z][a-z0-9_]*')
-  fi
-
-  [ ${#ext_names[@]} -eq 0 ] && { _fail "Keine Extensions gefunden."; return; }
+  [ ${#ext_names[@]} -eq 0 ] && { _fail "Keine Extensions in setup_php.sh gefunden."; read -r -p " Enter..." _; return; }
 
   local items=() missing=0 total=0
   local ext desc pkg_name line
@@ -468,23 +459,24 @@ menu_php_ext_select() {
     desc="$(grep -oP "PECL_DESC\\[$ext\\]=\"\\K[^\"]+" "$SCRIPT_DIR/setup_php.sh" 2>/dev/null || echo "$ext")"
     pkg_name="$(grep -oP "PECL_PKGNAME\\[$ext\\]=\"\\K[^\"]+" "$SCRIPT_DIR/setup_php.sh" 2>/dev/null || echo "$ext")"
     if compgen -G "${pkg_dir}/php${ver}-${pkg_name}_*_*.deb" >/dev/null 2>&1; then
-      printf -v line "%-18s $(_ok "[OK]")    %s" "$ext" "$desc"
+      printf -v line "%-20s [OK]    %s" "$ext" "$desc"
     else
-      printf -v line "%-18s $(_fail "[ -- ]") %s" "$ext" "$desc"
+      printf -v line "%-20s [ -- ]  %s" "$ext" "$desc"
       missing=$((missing + 1))
     fi
     items+=("$line")
   done
 
   clear
-  draw_header "PECL Extensions" "$(_ok "$((total - missing))") OK  $(_fail "$missing") fehlen  von $total"
+  local ok_n=$((total - missing))
+  draw_header "PECL Extensions" "$ok_n OK  |  $missing fehlen  |  $total gesamt"
   echo
 
   local choices
   choices=$(printf '%s\n' "${items[@]}" | fzf --multi \
     --header="Tab = auswaehlen | Enter = starten | ESC = abbrechen" \
-    --height=~25 --layout=reverse-list --no-sort --ansi \
-    --marker=" ❯ " --pointer=" ❯ " \
+    --height=~25 --layout=reverse-list --no-sort \
+    --marker=">" --pointer=">" \
     --color="fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,marker:#51afef,pointer:#51afef,header:#87af87,gutter:#444444,border:#444444" \
     --bind 'tab:toggle' --delimiter=' ' --nth=1) || return 0
 
@@ -492,11 +484,12 @@ menu_php_ext_select() {
 
   local ext_list=()
   while IFS= read -r line; do
-    ext_list+=("$(echo "$line" | awk '{print $1}')")
+    ext_list+=("${line%% *}")
   done <<< "$choices"
 
   echo
-  draw_box "PECL Build" "$C" "$(_bold "${#ext_list[@]} Extension(s):")  ${ext_list[*]}"
+  _bold "${#ext_list[@]} Extension(s): ${ext_list[*]}"
+  echo
   ask_confirm "Starten? (PGO=$USE_PGO  LTO=$USE_LTO)" || return 0
 
   run_build "setup_php.sh" "php_build" pecl-only "${ext_list[@]}"
