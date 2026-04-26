@@ -22,7 +22,7 @@ screen_cache="" screen_cache_ts=0
 screen_list_cached() {
   local now; now="$(date +%s)"
   if [ $((now - screen_cache_ts)) -gt 2 ]; then
-    screen_cache="$(screen -list 2>/dev/null)"
+    screen_cache="$(screen -list 2>/dev/null || echo "")"
     screen_cache_ts="$now"
   fi
   printf '%s' "$screen_cache"
@@ -79,18 +79,21 @@ ensure_deps() {
   (( ${#need[@]} == 0 )) && return
   command -v gum >/dev/null 2>&1 && gum style --bold --foreground "$R" -- "Installiere: ${need[*]}" || echo "Installiere: ${need[*]}"
   if ! command -v gum >/dev/null 2>&1; then
-    mkdir -p /etc/apt/keyrings
-    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null
-    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list
+    mkdir -p /etc/apt/keyrings || { echo "Fehler: Kann /etc/apt/keyrings nicht erstellen" >&2; exit 1; }
+    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null || { echo "Fehler: Charm GPG key download fehlgeschlagen" >&2; exit 1; }
+    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list || { echo "Fehler: Kann sources.list.d nicht schreiben" >&2; exit 1; }
   fi
-  apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y gum fzf curl 2>/dev/null
+  apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y gum fzf curl 2>/dev/null || { echo "apt-get install fehlgeschlagen" >&2; exit 1; }
   command -v gum >/dev/null 2>&1 || { echo "gum fehlgeschlagen"; exit 1; }
 }
 
 ensure_root() {
   [ "$(id -u)" -eq 0 ] && return
-  command -v sudo >/dev/null 2>&1 && exec sudo -E bash "$0" "$@"
-  echo "Root erforderlich." >&2; exit 1
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo -E bash "$0" "$@"
+  fi
+  echo "Root erforderlich." >&2
+  exit 1
 }
 
 ensure_scripts() {
@@ -131,7 +134,11 @@ cache_sys_info() {
   local h c m a
   h="$(hostname -s 2>/dev/null || echo '?')"
   c="$(nproc 2>/dev/null || echo '?')"
-  m="$(awk '/MemTotal/{printf "%.0fG",$2/1048576}' /proc/meminfo 2>/dev/null || echo '?')"
+  if [ -f /proc/meminfo ]; then
+    m="$(awk '/MemTotal/{printf "%.0fG",$2/1048576}' /proc/meminfo)" || m="?"
+  else
+    m="?"
+  fi
   a="$(uname -m 2>/dev/null || echo '?')"
   SYS_LINE="$h  │  ${c}C  │  ${m}  │  $a"
 }
@@ -202,7 +209,7 @@ choose() {
     --cursor=" ❯ " --cursor.foreground="$C" --selected.foreground="$G" --height=30
 }
 
-choose_or_back() { choose "$@" "Zurueck" || echo "Zurueck"; }
+choose_or_back() { choose "$@" "Zurück" || echo "Zurück"; }
 
 ask_path()    { gum input --placeholder="Pfad (leer = latest)" 3>/dev/null || echo ""; }
 ask_confirm() { local msg="$1"; shift; gum confirm "$msg" "$@" 2>/dev/null; }
@@ -260,7 +267,7 @@ run_in_screen() {
   chmod 755 "$path" 2>/dev/null || true
 
   if ! command -v screen >/dev/null 2>&1; then
-    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen >/dev/null 2>&1 || { _fail "screen-Installation fehlgeschlagen"; return 1; }
   fi
 
   if screen_active "$sname"; then
@@ -337,7 +344,7 @@ do_restore() {
 do_custom_args() {
   local script="$1"
   local a; a="$(gum input --placeholder='Args...')"
-  [ -n "$a" ] && run_script "$script" $a
+  [ -n "$a" ] && run_script "$script" "$a"
 }
 
 # ===================== SCREEN MENU =====================
@@ -347,7 +354,6 @@ menu_screens() {
     clear; draw_header "Screen Sessions"; echo
 
     local -a items=() snames=() states=() log_items=()
-    local idx=0
     for entry in "${SCREEN_MAP[@]}"; do
       IFS=: read -r sn sc <<< "$entry"
       local label="${sn%_build}" line
@@ -373,7 +379,10 @@ menu_screens() {
     for entry in "${SCREEN_MAP[@]}"; do
       IFS=: read -r sn sc <<< "$entry"
       local logpath; logpath="$(get_log_for_screen "$sn")"
-      [ -n "$logpath" ] && [ -f "$logpath" ] && log_items+=("${sn%_build}: $(du -h "$logpath" 2>/dev/null | cut -f1) $logpath")
+      if [ -n "$logpath" ] && [ -f "$logpath" ]; then
+        local logsize; logsize="$(stat -c%s "$logpath" 2>/dev/null | awk '{if ($1<1024) print $1"B"; else if ($1<1048576) printf "%.1fK\n",$1/1024; else printf "%.1fM\n",$1/1048576}')"
+        log_items+=("${sn%_build}: $logsize $logpath")
+      fi
     done
 
     local choice
@@ -384,7 +393,7 @@ menu_screens() {
       "Logs anzeigen...") || return
 
     case "$choice" in
-      "Zurueck") return ;;
+      "Zurück") return ;;
       "Alle"*)
         ask_confirm "Wirklich alle beenden?" || continue
         for entry in "${SCREEN_MAP[@]}"; do
@@ -471,10 +480,14 @@ menu_php_ext_select() {
   local -a ext_names=()
   while IFS= read -r ext; do
     [ -n "$ext" ] && ext_names+=("$ext")
-  done < <(awk '/^PECL_EXTENSIONS=\(/,/\)/' "$SCRIPT_DIR/setup_php.sh" 2>/dev/null \
+  done < <(sed -n '/^PECL_EXTENSIONS=(/,/^)/p' "$SCRIPT_DIR/setup_php.sh" 2>/dev/null \
     | grep -oE '^[[:space:]]+[a-z][a-z0-9_-]*' | sed 's/^[[:space:]]*//')
 
-  [ ${#ext_names[@]} -eq 0 ] && { _fail "Keine Extensions in setup_php.sh gefunden."; read -r -p " Enter..." _; return; }
+  if [ ${#ext_names[@]} -eq 0 ]; then
+    _fail "Keine Extensions in setup_php.sh gefunden."
+    read -r -p " Enter..." _
+    return
+  fi
 
   local items=() missing=0 total=0
   local ext desc pkg_name line
@@ -504,7 +517,10 @@ menu_php_ext_select() {
     --color="fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,marker:#51afef,pointer:#51afef,header:#87af87,gutter:#444444,border:#444444" \
     --bind 'tab:toggle' --delimiter=' ' --nth=1) || return 0
 
-  [ -z "$choices" ] && { _dim "Nichts ausgewaehlt."; return; }
+  if [ -z "$choices" ]; then
+    _dim "Nichts ausgewaehlt."
+    return
+  fi
 
   local ext_list=()
   while IFS= read -r line; do
@@ -525,7 +541,7 @@ menu_php() {
   local ver pkg_count=0
   ver="$(get_env_var setup_php.env PHP_VER_SHORT)"
   source "$SCRIPT_DIR/setup_php.env" 2>/dev/null || true
-  [ -d "${PACKAGE_DIR:-/root/php-packages}" ] && pkg_count="$(ls "${PACKAGE_DIR:-/root/php-packages}"/*.deb 2>/dev/null | wc -l)"
+  [ -d "${PACKAGE_DIR:-/root/php-packages}" ] && pkg_count="$(find "${PACKAGE_DIR:-/root/php-packages}" -maxdepth 1 -name '*.deb' -type f 2>/dev/null | wc -l)"
 
   while true; do
     clear; draw_header "PHP ${ver:-}" "$(_col "$P" "$pkg_count") Pakete"; echo
@@ -706,11 +722,11 @@ repo_info() {
   local t_dir="$repo_dir/testing" s_dir="$repo_dir/stable"
   local t_count=0 s_count=0 disk="" t_signed="nein" s_signed="nein" apt_ok="--" gpg_s="--"
   if [ -d "$t_dir" ]; then
-    t_count="$(ls "$t_dir"/*.deb 2>/dev/null | wc -l)"
+    t_count="$(find "$t_dir" -maxdepth 1 -name '*.deb' -type f 2>/dev/null | wc -l)"
     [ -f "$t_dir/InRelease" ] && t_signed="ja"
   fi
   if [ -d "$s_dir" ]; then
-    s_count="$(ls "$s_dir"/*.deb 2>/dev/null | wc -l)"
+    s_count="$(find "$s_dir" -maxdepth 1 -name '*.deb' -type f 2>/dev/null | wc -l)"
     [ -f "$s_dir/InRelease" ] && s_signed="ja"
   fi
   [ -d "$repo_dir" ] && disk="$(du -sh "$repo_dir" 2>/dev/null | cut -f1)"
@@ -735,16 +751,15 @@ repo_browse() {
   suite_sel=$(choose "Kanal:" "stable" "testing") || return
   local browse_dir="$repo_dir/$suite_sel"
 
-  if [ ! -d "$browse_dir" ] || ! ls "$browse_dir"/*.deb >/dev/null 2>&1; then
+  if [ ! -d "$browse_dir" ] || ! find "$browse_dir" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     _dim "Keine Pakete in $suite_sel."; read -r -p " Enter..." _; return
   fi
 
   local -a items=()
-  local deb pkg_size inst_ver="" inst_state
-  for deb in "$browse_dir"/*.deb; do
+  while IFS= read -r deb; do
+    local pkg_size pkg_name pkg_ver inst_ver inst_state
     [ -f "$deb" ] || continue
-    pkg_size="$(du -h "$deb" | cut -f1)"
-    local pkg_name="" pkg_ver=""
+    pkg_size="$(stat -c%s "$deb" 2>/dev/null | awk '{if ($1<1024) print $1"B"; else if ($1<1048576) printf "%.1fK\n",$1/1024; else printf "%.1fM\n",$1/1048576}')"
     pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null)"
     pkg_ver="$(dpkg-deb -f "$deb" Version 2>/dev/null)"
     inst_ver="$(dpkg-query -W -f '${Version}' "$pkg_name" 2>/dev/null || true)"
@@ -758,7 +773,7 @@ repo_browse() {
       inst_state="$(_dim "○")"
     fi
     items+=("${pkg_name:-$(basename "$deb")}  ${pkg_ver:---}  ${pkg_size}  ${inst_state}")
-  done
+  done < <(find "$browse_dir" -maxdepth 1 -name '*.deb' -type f)
 
   clear; draw_header "Repo: $suite_sel durchsuchen"; echo
   local sel
@@ -767,7 +782,9 @@ repo_browse() {
     --height=~30 --layout=reverse-list --no-sort --ansi \
     --color="fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,header:#87af87,border:#444444") || return
 
-  [ -z "$sel" ] && return
+  if [ -z "$sel" ]; then
+    return
+  fi
   local pkg="${sel%% *}"
 
   clear; draw_header "Paket: $pkg ($suite_sel)"; echo
@@ -787,13 +804,13 @@ repo_install_select() {
   repo_dir="${REPO_DIR:-/var/local/custom-repo}"
   local install_dir="$repo_dir/stable"
 
-  if [ ! -d "$install_dir" ] || ! ls "$install_dir"/*.deb >/dev/null 2>&1; then
+  if [ ! -d "$install_dir" ] || ! find "$install_dir" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     _dim "Keine Pakete in stable/."; read -r -p " Enter..." _; return
   fi
 
   local -a items=()
-  local deb pkg_name inst_ver
-  for deb in "$install_dir"/*.deb; do
+  while IFS= read -r deb; do
+    local pkg_name inst_ver
     [ -f "$deb" ] || continue
     pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || basename "$deb")"
     inst_ver="$(dpkg-query -W -f '${Version}' "$pkg_name" 2>/dev/null || true)"
@@ -802,7 +819,7 @@ repo_install_select() {
     else
       items+=("$(_dim "○") $pkg_name")
     fi
-  done
+  done < <(find "$install_dir" -maxdepth 1 -name '*.deb' -type f)
 
   clear; draw_header "Pakete installieren (stable)"; echo
   local choices
@@ -811,7 +828,10 @@ repo_install_select() {
     --height=~25 --layout=reverse-list --no-sort --ansi \
     --color="fg:#aaaaaa,fg+:#ffffff,bg+:#1a1a2e,hl:#51afef,hl+:#51afef,marker:#51afef,pointer:#51afef,header:#87af87,border:#444444") || return
 
-  [ -z "$choices" ] && { _dim "Nichts ausgewaehlt."; return; }
+  if [ -z "$choices" ]; then
+    _dim "Nichts ausgewaehlt."
+    return
+  fi
 
   local -a to_install=()
   while IFS= read -r line; do
@@ -844,15 +864,15 @@ repo_sync() {
   local total_new=0 nl=$'\n' lines=""
   for d in "${pkg_dirs[@]}"; do
     local label="$(basename "$d")"
-    if ! ls "$d"/*.deb >/dev/null 2>&1; then
+    if ! find "$d" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
       lines+="$(_dim "○ $label: leer")${nl}"; continue
     fi
     local new=0
-    for deb in "$d"/*.deb; do
+    while IFS= read -r deb; do
       [ -f "$deb" ] || continue
       local bn; bn="$(basename "$deb")"
       [ -f "$testing_dir/$bn" ] || [ -f "$repo_dir/stable/$bn" ] || new=$((new + 1))
-    done
+    done < <(find "$d" -maxdepth 1 -name '*.deb' -type f)
     if [ "$new" -gt 0 ]; then
       lines+="$(_ok "✔ $label: $new neu")${nl}"
       total_new=$((total_new + new))
@@ -1001,6 +1021,15 @@ menu_f2btest() {
 
 # ===================== SYSTEM MENUS =====================
 
+clean_php_all() {
+  local PE="setup_php.env"
+  rm -rf "$(get_env_var "$PE" STAGE_PHP)" 2>/dev/null || true
+  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-$(get_env_var "$PE" PHP_VERSION)" 2>/dev/null || true
+  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-pecl" 2>/dev/null || true
+  rm -rf /tmp/php-pgo-stage 2>/dev/null || true
+  rm -f "$(get_env_var "$PE" PACKAGE_DIR)"/*.deb 2>/dev/null || true
+}
+
 menu_clean() {
   while true; do
     clear; draw_header "Build-Artefakte loeschen"; echo
@@ -1019,38 +1048,32 @@ menu_clean() {
       "Alle Staging" \
       "ALLE Artefakte")
 
-    [ "$choice" = "Zurueck" ] && return
+    [ "$choice" = "Zurück" ] && return
     ask_confirm "$choice  wirklich loeschen?" || continue
 
     local PE="setup_php.env" NE="setup_nginx.env" DE="setup_dovecot.env" FE="setup_postfix.env"
 
     case "$choice" in
-      "PHP: S"*)  rm -rf "$(get_env_var "$PE" STAGE_PHP)" ;;
-      "PHP: B"*)  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-$(get_env_var "$PE" PHP_VERSION)" ;;
-      "PHP: P"*)  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-pecl" ;;
-      "PHP: G"*)  rm -rf /tmp/php-pgo-stage ;;
-      "PHP: Pak"*) rm -f "$(get_env_var "$PE" PACKAGE_DIR)"/*.deb 2>/dev/null ;;
-      "PHP: A"*)
-        rm -rf "$(get_env_var "$PE" STAGE_PHP)"
-        rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-$(get_env_var "$PE" PHP_VERSION)"
-        rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-pecl"
-        rm -rf /tmp/php-pgo-stage
-        rm -f "$(get_env_var "$PE" PACKAGE_DIR)"/*.deb 2>/dev/null ;;
-      "Nginx"*)   rm -rf "$(get_env_var "$NE" STAGE_NGINX)" ;;
-      "Dovecot"*) rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)" ;;
-      "Postfix"*) rm -rf "$(get_env_var "$FE" STAGE_POSTFIX)" ;;
+      "PHP: S"*)  rm -rf "$(get_env_var "$PE" STAGE_PHP)" 2>/dev/null || true ;;
+      "PHP: B"*)  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-$(get_env_var "$PE" PHP_VERSION)" 2>/dev/null || true ;;
+      "PHP: P"*)  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-pecl" 2>/dev/null || true ;;
+      "PHP: G"*)  rm -rf /tmp/php-pgo-stage 2>/dev/null || true ;;
+      "PHP: Pak"*) rm -f "$(get_env_var "$PE" PACKAGE_DIR)"/*.deb 2>/dev/null || true ;;
+      "PHP: A"*)  clean_php_all ;;
+      "Nginx"*)   rm -rf "$(get_env_var "$NE" STAGE_NGINX)" 2>/dev/null || true ;;
+      "Dovecot"*) rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)" 2>/dev/null || true ;;
+      "Postfix"*) rm -rf "$(get_env_var "$FE" STAGE_POSTFIX)" 2>/dev/null || true ;;
       "Alle S"*)
-        rm -rf "$(get_env_var "$PE" STAGE_PHP)"
-        rm -rf "$(get_env_var "$NE" STAGE_NGINX)"
-        rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)"
-        rm -rf "$(get_env_var "$FE" STAGE_POSTFIX)" ;;
+        rm -rf "$(get_env_var "$PE" STAGE_PHP)" 2>/dev/null || true
+        rm -rf "$(get_env_var "$NE" STAGE_NGINX)" 2>/dev/null || true
+        rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)" 2>/dev/null || true
+        rm -rf "$(get_env_var "$FE" STAGE_POSTFIX)" 2>/dev/null || true ;;
       "ALLE"*)
-        rm -rf "$(get_env_var "$PE" STAGE_PHP)"
-        rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-$(get_env_var "$PE" PHP_VERSION)"
-        rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-pecl" /tmp/php-pgo-stage
-        rm -f "$(get_env_var "$PE" PACKAGE_DIR)"/*.deb 2>/dev/null
-        rm -rf "$(get_env_var "$NE" STAGE_NGINX)" "$(get_env_var "$NE" BUILD_ROOT)/nginx-$(get_env_var "$NE" NGINX_VERSION)"
-        rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)" "$(get_env_var "$FE" STAGE_POSTFIX)" ;;
+        clean_php_all
+        rm -rf "$(get_env_var "$NE" STAGE_NGINX)" 2>/dev/null || true
+        rm -rf "$(get_env_var "$NE" BUILD_ROOT)/nginx-$(get_env_var "$NE" NGINX_VERSION)" 2>/dev/null || true
+        rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)" 2>/dev/null || true
+        rm -rf "$(get_env_var "$FE" STAGE_POSTFIX)" 2>/dev/null || true ;;
     esac
     _ok "✔ Bereinigt."; read -r -p " Enter..." _
   done
@@ -1125,6 +1148,7 @@ check_all_updates() {
 
 git_update() {
   [ -d "$SCRIPT_DIR/.git" ] || return
+  command -v git >/dev/null 2>&1 || return
   local output
   output="$(git -C "$SCRIPT_DIR" pull 2>&1)" || { _fail "git pull fehlgeschlagen"; return; }
   echo "$output" | grep -qi "already up.to.date\|current" && return

@@ -75,7 +75,7 @@ start_services() {
 backup_postfix() {
   local dest="$1"
   log "  Sichere Postfix..."
-  mkdir -p "$dest/postfix"
+  mkdir -p "$dest/postfix" || { log "FEHLER: Kann $dest/postfix nicht erstellen"; return 1; }
 
   [ -d /etc/postfix ]                       && cp -a /etc/postfix                       "$dest/postfix/etc_postfix"
   [ -d /usr/lib/postfix ]                   && cp -a /usr/lib/postfix                   "$dest/postfix/usr_lib_postfix"
@@ -93,7 +93,7 @@ backup_postfix() {
 backup_dovecot() {
   local dest="$1"
   log "  Sichere Dovecot..."
-  mkdir -p "$dest/dovecot"
+  mkdir -p "$dest/dovecot" || { log "FEHLER: Kann $dest/dovecot nicht erstellen"; return 1; }
 
   [ -d /etc/dovecot ]                        && cp -a /etc/dovecot                        "$dest/dovecot/etc_dovecot"
   [ -d /usr/lib/dovecot ]                    && cp -a /usr/lib/dovecot                    "$dest/dovecot/usr_lib_dovecot"
@@ -111,7 +111,7 @@ backup_dovecot() {
 backup_nginx() {
   local dest="$1"
   log "  Sichere Nginx..."
-  mkdir -p "$dest/nginx"
+  mkdir -p "$dest/nginx" || { log "FEHLER: Kann $dest/nginx nicht erstellen"; return 1; }
 
   [ -d /etc/nginx ]                        && cp -a /etc/nginx                        "$dest/nginx/etc_nginx"
   [ -d /usr/lib/nginx ]                    && cp -a /usr/lib/nginx                    "$dest/nginx/usr_lib_nginx"
@@ -160,7 +160,7 @@ backup_system() {
 backup_deb_cache() {
   local dest="$1"
   log "  Cache installierter .deb-Pakete..."
-  mkdir -p "$dest/apt-cache"
+  mkdir -p "$dest/apt-cache" || { log "FEHLER: Kann $dest/apt-cache nicht erstellen"; return 1; }
 
   local pkg_list="$dest/system/dpkg-selections.txt"
   if [ -f "$pkg_list" ]; then
@@ -177,7 +177,7 @@ backup_deb_cache() {
 
   local php_pkg_dir="${PHP_PKG_DIR:-/root/php-packages}"
   for pkg_dir in "$POSTFIX_PKG_DIR" "$DOVECOT_PKG_DIR" "$NGINX_PKG_DIR" "$php_pkg_dir"; do
-    if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
+    if [ -d "$pkg_dir" ] && find "$pkg_dir" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
       cp -a "$pkg_dir"/*.deb "$dest/apt-cache/" 2>/dev/null || true
     fi
   done
@@ -194,7 +194,7 @@ do_full_backup() {
   local ts backup_dir
   ts="$(date '+%F_%H%M%S')"
   backup_dir="$BACKUP_ROOT/$ts"
-  mkdir -p "$backup_dir"
+  mkdir -p "$backup_dir" || { log "FEHLER: Kann $backup_dir nicht erstellen"; return 1; }
 
   log "===== Voll-Backup nach $backup_dir ====="
 

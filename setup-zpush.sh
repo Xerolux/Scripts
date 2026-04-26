@@ -66,18 +66,18 @@ install_zpush_from_github_release() {
   apt-get update -qq
   apt-get install -y curl tar php-fpm php-imap php-mbstring php-curl php-xml php-soap php-intl
 
-  curl -fsSL "$archive_url" -o "$archive_path"
+  curl -fsSL --connect-timeout 30 --max-time 300 "$archive_url" -o "$archive_path" || fail "Z-Push download fehlgeschlagen: $archive_url"
   rm -rf "$extract_dir"
-  tar -xzf "$archive_path" -C /tmp
+  tar -xzf "$archive_path" -C /tmp || fail "Tar-Extraktion fehlgeschlagen"
 
   [[ -d "$extract_dir/src" ]] || fail "Z-Push Release enthält kein src-Verzeichnis: ${extract_dir}/src"
 
-  mkdir -p /usr/share/z-push
-  cp -a "$extract_dir/src/." /usr/share/z-push/
+  mkdir -p /usr/share/z-push || fail "Kann /usr/share/z-push nicht erstellen"
+  cp -a "$extract_dir/src/." /usr/share/z-push/ || fail "Kann Z-Push-Dateien nicht kopieren"
 
-  mkdir -p /etc/z-push
-  [[ -f "/etc/z-push/z-push.conf.php" ]] || cp -a /usr/share/z-push/config.php /etc/z-push/z-push.conf.php
-  [[ -f "/etc/z-push/imap.conf.php" ]] || cp -a /usr/share/z-push/backend/imap/config.php /etc/z-push/imap.conf.php
+  mkdir -p /etc/z-push || fail "Kann /etc/z-push nicht erstellen"
+  [[ -f "/etc/z-push/z-push.conf.php" ]] || cp -a /usr/share/z-push/config.php /etc/z-push/z-push.conf.php || fail "Kann config.php nicht kopieren"
+  [[ -f "/etc/z-push/imap.conf.php" ]] || cp -a /usr/share/z-push/backend/imap/config.php /etc/z-push/imap.conf.php || fail "Kann imap.conf.php nicht kopieren"
 
   [[ -f "/usr/share/z-push/index.php" ]] || fail "Fallback-Installation unvollständig: /usr/share/z-push/index.php fehlt"
 }

@@ -24,6 +24,9 @@
 # ==============================================================================
 set -Eeuo pipefail
 
+# Cleanup on exit/error
+trap 'rm -f /tmp/repo-batch-*$$* 2>/dev/null' EXIT INT TERM
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -f "$SCRIPT_DIR/setup_local_repo.env" ]] && [[ -f "$SCRIPT_DIR/setup_local_repo.env.example" ]]; then
@@ -153,21 +156,22 @@ init_gpg() {
   detect_gpg_key 2>/dev/null && { log "Bereits vorhanden: $GPG_KEY_ID"; return 0; }
 
   apt-get update -qq --allow-releaseinfo-change 2>/dev/null || apt-get update -qq 2>/dev/null || true
-  DEBIAN_FRONTEND=noninteractive apt-get install -y gnupg
-  mkdir -p "$GPG_KEYRING_DIR"; chmod 700 "$GPG_KEYRING_DIR"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y gnupg || die "gnupg installation failed"
+  mkdir -p "$GPG_KEYRING_DIR" || die "Kann $GPG_KEYRING_DIR nicht erstellen"
+  chmod 700 "$GPG_KEYRING_DIR" || die "Kann Permissions nicht ändern"
 
   local batch_file="/tmp/gpg-batch-$$"
   cat > "$batch_file" <<GPGCONF
 %no-protection
 Key-Type: Ed25519
-Subkey-Type: Curve25519
+Subkey-Type: Ed25519
 Name-Real: ${GPG_KEY_NAME}
 Name-Email: ${GPG_KEY_EMAIL}
 Expire-Date: 0
 %commit
 GPGCONF
-  log "Erstelle Ed25519/Curve25519..."
-  gpg_cmd --gen-key --batch "$batch_file"
+  log "Erstelle Ed25519..."
+  gpg_cmd --gen-key --batch "$batch_file" || die "GPG Key-Erstellung fehlgeschlagen"
   rm -f "$batch_file"
   detect_gpg_key || die "GPG fehlgeschlagen"
   log "GPG erstellt: $GPG_KEY_ID"
@@ -201,8 +205,8 @@ build_index() {
   # Contents-$arch (apt-file Support)
   local contents_file="Contents-${REPO_ARCH}"
   : > "$contents_file"
-  if ls ./*.deb >/dev/null 2>&1; then
-    for deb in ./*.deb; do
+  if find . -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
+    while IFS= read -r deb; do
       [ -f "$deb" ] || continue
       local pkg_name
       pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || continue)"
@@ -212,7 +216,7 @@ build_index() {
           gsub(/^\.\//,"",f)
           print f" "pkg
         }' >> "$contents_file"
-    done
+    done < <(find . -maxdepth 1 -name '*.deb' -type f)
   fi
   gzip -9kc "$contents_file" > "${contents_file}.gz"
 
@@ -232,7 +236,9 @@ RELEASEHEAD
   # Hash-Bloecke + by-hash
   local md5_block="" sha1_block="" sha256_block="" sha512_block=""
   local hash_files="Packages Packages.gz ${contents_file} ${contents_file}.gz"
-  hash_files+=" $(ls ./*.deb 2>/dev/null || true)"
+  while IFS= read -r deb; do
+    hash_files+=" $(basename "$deb")"
+  done < <(find . -maxdepth 1 -name '*.deb' -type f)
 
   mkdir -p by-hash/MD5Sum by-hash/SHA1 by-hash/SHA256 by-hash/SHA512
 
@@ -271,8 +277,8 @@ RELEASEHEAD
     log "WARNUNG: Kein GPG - $suite nicht signiert"
   fi
 
-  if ls ./*.deb >/dev/null 2>&1; then
-    sha256sum ./*.deb > SHA256SUMS
+  if find . -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
+    find . -maxdepth 1 -name '*.deb' -type f -exec sha256sum {} \; > SHA256SUMS
   fi
 
   local cnt; cnt="$(grep -c '^Package:' Packages 2>/dev/null || echo 0)"
@@ -839,7 +845,7 @@ install_repo() {
   acquire_lock
 
   apt-get update -qq --allow-releaseinfo-change 2>/dev/null || apt-get update -qq 2>/dev/null || true
-  DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-dev gnupg
+  DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-dev gnupg || die "apt-get install fehlgeschlagen"
 
   mkdir -p "$REPO_TESTING" "$REPO_STABLE"
 
@@ -848,7 +854,7 @@ install_repo() {
 
   local packages_copied=0
   for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR" "$PHP_PKG_DIR"; do
-    if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
+    if [ -d "$pkg_dir" ] && find "$pkg_dir" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
       cp -a "$pkg_dir"/*.deb "$REPO_TESTING/"
       packages_copied=1
     fi
@@ -880,8 +886,8 @@ update_repo() {
 
   local new_count=0 new_list=""
   for pkg_dir in "$DOVECOT_PKG_DIR" "$POSTFIX_PKG_DIR" "$NGINX_PKG_DIR" "$PHP_PKG_DIR"; do
-    if [ -d "$pkg_dir" ] && ls "$pkg_dir"/*.deb >/dev/null 2>&1; then
-      for deb in "$pkg_dir"/*.deb; do
+    if [ -d "$pkg_dir" ] && find "$pkg_dir" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
+      while IFS= read -r deb; do
         [ -f "$deb" ] || continue
         local bn; bn="$(basename "$deb")"
         if [ ! -f "$REPO_TESTING/$bn" ] && [ ! -f "$REPO_STABLE/$bn" ]; then
@@ -889,7 +895,7 @@ update_repo() {
           new_list+="  $bn"$'\n'
           new_count=$((new_count + 1))
         fi
-      done
+      done < <(find "$pkg_dir" -maxdepth 1 -name '*.deb' -type f)
     fi
   done
 

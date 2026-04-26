@@ -16,6 +16,9 @@
 # ==============================================================================
 set -Eeuo pipefail
 
+# Cleanup on exit/error
+trap 'rm -f /tmp/dovecot-build-$$* 2>/dev/null' EXIT INT TERM
+
 if [[ ! -f "setup_dovecot.env" ]]; then
   echo "FEHLER: setup_dovecot.env nicht gefunden. Bitte aus setup_dovecot.env.example erstellen." >&2
   exit 1
@@ -294,7 +297,7 @@ create_backup() {
   fi
 
   # Erzeugte Custom-.deb-Pakete mit sichern
-  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     cp -a "$PACKAGE_DIR" "$backup_dir/deb-packages" || true
   fi
 
@@ -370,8 +373,8 @@ install_build_deps() {
 # Quellen klonen
 # ------------------------------------------------------------------------------
 prepare_sources() {
-  mkdir -p "$BUILD_ROOT"
-  cd "$BUILD_ROOT"
+  mkdir -p "$BUILD_ROOT" || die "Kann $BUILD_ROOT nicht erstellen"
+  cd "$BUILD_ROOT" || die "Kann nicht zu $BUILD_ROOT wechseln"
   rm -rf core pigeonhole
 
   # Dovecot Tarball
@@ -656,7 +659,7 @@ build_pigeonhole() {
 # SHA256-Checksummen fuer alle erzeugten .deb-Pakete
 # ------------------------------------------------------------------------------
 generate_checksums() {
-  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     log "Erstelle SHA256SUMS fuer Pakete..."
     cd "$PACKAGE_DIR"
     sha256sum ./*.deb > SHA256SUMS

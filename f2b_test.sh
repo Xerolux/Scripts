@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-service fail2ban start || true
-fail2ban-client start || true
-fail2ban-client add sshd || true
-fail2ban-client set sshd addignoreip 1.2.3.4 || true
+# Cleanup on exit
+trap 'rm -f /tmp/f2b-$$* 2>/dev/null' EXIT INT TERM
+
+LOG_FILE="${LOG_FILE:--}"
+log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
+
+log "Starting Fail2Ban test..."
+service fail2ban start || { log "WARN: service fail2ban start failed"; true; }
+fail2ban-client start || { log "WARN: fail2ban-client start failed"; true; }
+fail2ban-client add sshd || { log "WARN: fail2ban-client add sshd failed"; true; }
+fail2ban-client set sshd addignoreip 1.2.3.4 || { log "WARN: addignoreip failed"; true; }
+log "Fail2Ban test completed"
