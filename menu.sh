@@ -928,12 +928,8 @@ menu_unbanip() {
     choice=$(choose_or_back "" "Automatikmodus" "Bans anzeigen" "Gezieltes Unban" "Eigene Argumente...")
     case "$choice" in
       "Automatik"*)
-        local domain prefix; local -a args=()
-        domain="$(gum input --placeholder='Domain (leer = default)')" || continue
-        prefix="$(gum input --placeholder='IPv6 Prefix (leer = default)')" || continue
-        [ -n "${domain// }" ] && args+=(--domain "$domain")
-        [ -n "${prefix// }" ] && args+=(--prefix-length "$prefix")
-        ask_confirm "Dry-Run?" && args+=(--test)
+        local -a args=()
+        ask_confirm "Dry-Run (Test-Modus)?" && args+=(--test)
         run_script "unban_ip.sh" "${args[@]}" ;;
       "Bans"*)  run_script "unban_ip.sh" --bans ;;
       "Geziel"*)
