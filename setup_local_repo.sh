@@ -216,7 +216,7 @@ generate_release() {
   log "Erstelle Release-Datei..."
 
   local now
-  now="$(date -u '+%a, %d %b %Y %H:%M:%S UTC')"
+  now="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S UTC')"
 
   cat > Release <<RELEASEHEAD
 Origin: Xerolux Repository
