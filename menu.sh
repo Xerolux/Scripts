@@ -133,26 +133,56 @@ cache_sys_info() {
   c="$(nproc 2>/dev/null || echo '?')"
   m="$(awk '/MemTotal/{printf "%.0fG",$2/1048576}' /proc/meminfo 2>/dev/null || echo '?')"
   a="$(uname -m 2>/dev/null || echo '?')"
-  SYS_LINE="$h  │  ${c} Cores  │  ${m} RAM  │  $a"
+  SYS_LINE="$h  │  ${c}C  │  ${m}  │  $a"
 }
 
 draw_header() {
   local title="${1:-}" extras="${2:-}"
   cache_sys_info
-
   local nl=$'\n'
-  local hdr=""
-  if [ -n "$title" ]; then
-    hdr+="$(gum style --bold --foreground "$C" -- "$title")${nl}"
-  fi
-  hdr+="$(gum style --foreground "$W" -- "$SYS_LINE")${nl}"
-  hdr+="$(badge PGO "$USE_PGO") $(badge LTO "$USE_LTO") $(badge Force "$FORCE_REBUILD")"
 
   local sc; sc="$(screen_count)"
-  [ "$sc" -gt 0 ] && hdr+="${nl}$(gum style --foreground "$Y" -- "⚡ $sc Session(s)")"
-  [ -n "$extras" ] && hdr+="${nl}$extras"
 
-  gum style --border double --padding "0 3" --align center --foreground "$C" -- "$hdr"
+  local title_block=""
+  if [ -n "$title" ]; then
+    title_block="$(gum style --bold --foreground "$C" -- "$title")${nl}"
+  fi
+
+  local badge_line
+  badge_line="$(badge PGO "$USE_PGO")  $(badge LTO "$USE_LTO")  $(badge Force "$FORCE_REBUILD")"
+
+  local info_line=""
+  [ "$sc" -gt 0 ] && info_line="${nl}$(gum style --foreground "$Y" -- "⚡ $sc Session(s)")"
+  [ -n "$extras" ] && info_line+="${nl}$extras"
+
+  local top="$title_block$(gum style --foreground 254 -- "$SYS_LINE")${nl}${badge_line}${info_line}"
+  gum style --border double --padding "0 3" --align center --foreground "$C" -- "$top"
+}
+
+draw_banner() {
+  local nl=$'\n'
+  local sc; sc="$(screen_count)"
+  cache_sys_info
+
+  local logo
+  logo="$(gum style --bold --foreground "$C" -- '  ╔═══════════════════════════════╗')
+$(gum style --bold --foreground "$C" -- '  ║     SERVER  MANAGEMENT       ║')
+$(gum style --bold --foreground "$C" -- '  ╚═══════════════════════════════╝')"
+
+  local info_bar
+  info_bar="$(gum style --foreground 254 -- "$SYS_LINE")"
+
+  local badge_line
+  badge_line="$(badge PGO "$USE_PGO")  $(badge LTO "$USE_LTO")  $(badge Force "$FORCE_REBUILD")"
+
+  local screen_line=""
+  [ "$sc" -gt 0 ] && screen_line="${nl}$(gum style --foreground "$Y" -- "⚡ $sc Session(s)")"
+
+  local footer
+  footer="$(gum style --foreground "$GR" -- '  ↑↓ Navigate  │  Enter Select  │  ESC Back')"
+
+  local full="${logo}${nl}${nl}${info_bar}${nl}${badge_line}${screen_line}${nl}${nl}${footer}"
+  gum style --padding "1 2" -- "$full"
 }
 
 draw_box() {
@@ -163,6 +193,8 @@ draw_box() {
   gum style --border rounded --padding "0 1" --foreground "$color" -- \
     "$(gum style --bold --foreground "$color" -- " $title ")${nl}${body}"
 }
+
+sep() { _dim "────────────────────────────────"; }
 
 choose() {
   local hdr="${1:-}"; shift
@@ -175,7 +207,11 @@ choose_or_back() { choose "$@" "$(_dim "← Zurueck")" || echo "Zurueck"; }
 ask_path()    { gum input --placeholder="Pfad (leer = latest)" 3>/dev/null || echo ""; }
 ask_confirm() { local msg="$1"; shift; gum confirm "$msg" "$@" 2>/dev/null; }
 ask_screen()  {
-  gum confirm "▶ Im Hintergrund starten? (Screen)" --affirmative="Screen" --negative="Vordergrund" 2>/dev/null
+  local nl=$'\n'
+  gum style --border rounded --padding "0 1" --foreground "$Y" -- \
+    "▶ Build starten${nl}${nl}$(gum style --foreground "$G" --bold -- "Screen")  =  im Hintergrund${nl}$(gum style --foreground "$C" --bold -- "Vordergrund")  =  direkt sehen" > /dev/tty
+  echo "" > /dev/tty
+  gum confirm "" --affirmative="Screen" --negative="Vordergrund" 2>/dev/null
 }
 
 # ===================== RUNNERS =====================
@@ -322,7 +358,7 @@ menu_screens() {
     local choice
     choice=$(choose_or_back "" \
       "${items[@]}" \
-      "$(_dim "─── Aktionen ───")" \
+      "$(sep)" \
       "Alle Sessions beenden" \
       "Logs anzeigen...") || return
 
@@ -347,7 +383,7 @@ menu_screens() {
           local lp; lp="$(get_log_for_screen "$sn_found")"
           clear; _dim "=== $lp === (Strg+C = zurueck)"; tail -f "$lp"
         fi ;;
-      *"Aktionen"*) continue ;;
+      *"────"*) continue ;;
       *)
         local match_idx=-1
         local i=0
@@ -498,14 +534,14 @@ menu_php() {
       "Komplett"*)   run_build "setup_php.sh" "php_build" package ;;
       "Force"*)      FORCE_REBUILD=yes run_build "setup_php.sh" "php_build" package ;;
       "Einzelne"*)   menu_php_ext_select ;;
-      *"Verwaltung"*) continue ;;
+      *"────"*) continue ;;
       "Installieren"*) run_script "setup_php.sh" install ;;
       "Status"*)     run_script "setup_php.sh" status ;;
       "Pakete"*)     run_script "setup_php.sh" list-packages ;;
       "Extensions"*) run_script "setup_php.sh" list-extensions ;;
       "Konfiguration"*) run_script "setup_php.sh" check-config ;;
       "Verifikation"*) run_script "setup_php.sh" verify ;;
-      *"Backup"*) continue ;;
+      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_php.sh" backup ;;
       "wiederher"*)  do_restore "setup_php.sh" "php_build" restore ;;
       "Backups"*)    run_script "setup_php.sh" list-backups ;;
@@ -540,13 +576,13 @@ menu_nginx() {
       "Pakete"*)      run_build "setup_nginx.sh" "nginx_build" package ;;
       "Installieren"*) run_script "setup_nginx.sh" install ;;
       "Status"*)      run_script "setup_nginx.sh" status ;;
-      *"Details"*) continue ;;
+      *"────"*) continue ;;
       "Module"*)      run_script "setup_nginx.sh" list-modules ;;
       "Backups"*)     run_script "setup_nginx.sh" list-backups ;;
       "Updates"*)     run_script "setup_nginx.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_nginx.sh" check-config ;;
       "Verifikation"*) run_script "setup_nginx.sh" verify ;;
-      *"Backup"*) continue ;;
+      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_nginx.sh" backup ;;
       "wiederher"*)   do_restore "setup_nginx.sh" "nginx_build" restore ;;
       "Deinstall"*)   run_script "setup_nginx.sh" uninstall ;;
@@ -582,14 +618,14 @@ menu_dovecot() {
       "Nur Dovecot"*) run_build "setup_dovecot.sh" "dovecot_build" package-dovecot ;;
       "Nur Pig"*)     run_build "setup_dovecot.sh" "dovecot_build" package-pigeonhole ;;
       "Nur komp"*)    run_build "setup_dovecot.sh" "dovecot_build" build-only ;;
-      *"Verwaltung"*) continue ;;
+      *"────"*) continue ;;
       "Installieren"*) run_script "setup_dovecot.sh" install ;;
       "Status"*)      run_script "setup_dovecot.sh" status ;;
       "Backups"*)     run_script "setup_dovecot.sh" list-backups ;;
       "Pakete"*)      run_script "setup_dovecot.sh" list-packages ;;
       "Updates"*)     run_script "setup_dovecot.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_dovecot.sh" check-config ;;
-      *"Backup"*) continue ;;
+      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_dovecot.sh" backup ;;
       "wiederher"*)   do_restore "setup_dovecot.sh" "dovecot_build" restore ;;
       "Deinstall"*)   run_script "setup_dovecot.sh" uninstall ;;
@@ -622,12 +658,12 @@ menu_postfix() {
       "Pakete"*)      run_build "setup_postfix.sh" "postfix_build" package ;;
       "Installieren"*) run_script "setup_postfix.sh" install ;;
       "Status"*)      run_script "setup_postfix.sh" status ;;
-      *"Details"*) continue ;;
+      *"────"*) continue ;;
       "Backups"*)     run_script "setup_postfix.sh" list-backups ;;
       "Updates"*)     run_script "setup_postfix.sh" check-updates ;;
       "Konfiguration"*) run_script "setup_postfix.sh" check-config ;;
       "Verifikation"*) run_script "setup_postfix.sh" verify ;;
-      *"Backup"*) continue ;;
+      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_postfix.sh" backup ;;
       "wiederher"*)   do_restore "setup_postfix.sh" "postfix_build" restore ;;
       "Deinstall"*)   run_script "setup_postfix.sh" uninstall ;;
@@ -830,7 +866,7 @@ menu_localrepo() {
       "synchronisieren"*)  repo_sync ;;
       "durchsuchen"*)      repo_browse ;;
       "installieren"*)     repo_install_select ;;
-      *"Verwaltung"*) continue ;;
+      *"────"*) continue ;;
       "Status"*)           run_script "setup_local_repo.sh" status ;;
       "GPG"*)              run_script "setup_local_repo.sh" init-gpg ;;
       "Public"*)           run_script "setup_local_repo.sh" export-key ;;
@@ -868,12 +904,12 @@ menu_backuprestore() {
       "Nur Post"*) run_script "setup_backup_restore.sh" backup-postfix ;;
       "Nur Dove"*) run_script "setup_backup_restore.sh" backup-dovecot ;;
       "Nur Ngin"*) run_script "setup_backup_restore.sh" backup-nginx ;;
-      *"Restore"*) continue ;;
+      *"────"*) continue ;;
       "Full R"*)   do_restore "setup_backup_restore.sh" "-" restore ;;
       "Postfix R"*) do_restore "setup_backup_restore.sh" "-" restore-postfix ;;
       "Dovecot R"*) do_restore "setup_backup_restore.sh" "-" restore-dovecot ;;
       "Nginx R"*)  do_restore "setup_backup_restore.sh" "-" restore-nginx ;;
-      *"Aktionen"*) continue ;;
+      *"────"*) continue ;;
       "auflisten"*) run_script "setup_backup_restore.sh" list ;;
       "verifizieren"*) do_restore "setup_backup_restore.sh" "-" verify ;;
       "Eigene"*)   do_custom_args "setup_backup_restore.sh" ;;
@@ -1061,7 +1097,7 @@ main_menu() {
   postfix_ver="$(get_env_var setup_postfix.env POSTFIX_VERSION)"
 
   while true; do
-    clear; draw_header "SERVER MANAGEMENT"; echo
+    clear; draw_banner; echo
 
     local sc; sc="$(screen_count)"
     local screen_label="Screens"
@@ -1073,40 +1109,38 @@ main_menu() {
       "$(_col "$G" "●") Nginx ${nginx_ver:-}" \
       "$(_col "$Y" "●") Dovecot" \
       "$(_col "$B" "●") Postfix ${postfix_ver:-}" \
-      "$(_dim "─── Dienste ─────────")" \
+      "$(sep)" \
       "Z-Push ActiveSync" \
       "Backup / Restore" \
       "Lokales Repository" \
-      "$(_dim "─── Tools ──────────")" \
+      "$(sep)" \
       "IP Unban" \
       "Fail2Ban Test" \
       "$screen_label" \
-      "$(_dim "─── System ─────────")" \
+      "$(sep)" \
       "Clean" \
       "Settings" \
       "System-Info" \
       "Updates pruefen" \
-      "$(_fail "Beenden")") || break
+      "$(_fail "✘ Beenden")") || break
 
     case "$choice" in
       PHP*)       menu_php ;;
       Nginx*)     menu_nginx ;;
       Dovecot*)   menu_dovecot ;;
       Postfix*)   menu_postfix ;;
-      *"Dienste"*) continue ;;
+      *"────"*) continue ;;
       Z-Push*)    menu_zpush ;;
       Backup*)    menu_backuprestore ;;
       Lokales*)   menu_localrepo ;;
-      *"Tools"*) continue ;;
       IP*)        menu_unbanip ;;
       Fail2Ban*)  menu_f2btest ;;
       Screen*|"Screens"*) menu_screens ;;
-      *"System"*) continue ;;
       Clean*)     menu_clean ;;
       Settings*)  menu_settings ;;
       System*)    menu_sysinfo ;;
       Updates*)   check_all_updates ;;
-      Beenden*)   break ;;
+      Beenden*|"✘"*) break ;;
     esac
   done
 }
