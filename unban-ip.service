@@ -1,0 +1,26 @@
+[Unit]
+Description=Unban IP Service - Domain IP Change Monitor
+Documentation=man:unban_ip(8)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/unban-ip
+ExecStart=/opt/unban-ip/unban_ip.sh --silent
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=unban-ip
+
+# Security
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+# Must run as root for Fail2Ban/CrowdSec
+User=root
+
+# Restart on failure
+Restart=on-failure
+RestartSec=10s
+StartLimitInterval=60s
+StartLimitBurst=3

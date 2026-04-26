@@ -992,7 +992,17 @@ menu_unbanip() {
   while true; do
     clear; draw_header "IP Unban"; echo
     local choice
-    choice=$(choose_or_back "" "Automatikmodus" "Bans anzeigen" "Gezieltes Unban" "Eigene Argumente...")
+    choice=$(choose_or_back "" \
+      "Automatikmodus" \
+      "Bans anzeigen" \
+      "Gezieltes Unban" \
+      "$(sep)" \
+      "Service installieren" \
+      "Service-Status" \
+      "Service deinstallieren" \
+      "Interval aktualisieren" \
+      "$(sep)" \
+      "Eigene Argumente...")
     case "$choice" in
       "Automatik"*)
         local -a args=()
@@ -1003,6 +1013,19 @@ menu_unbanip() {
         local t; t="$(gum input --placeholder='IP / CIDR / Domain')" || continue
         [ -z "${t// }" ] && { _fail "Kein Target."; continue; }
         run_script "unban_ip.sh" --unban "$t" ;;
+      *"──"*)   continue ;;
+      "Service installieren"*)
+        ask_confirm "Service installieren? (systemd Timer alle 30min)" && \
+        run_script "unban-ip-installer.sh" install ;;
+      "Service-Status"*)
+        clear; run_script "unban-ip-installer.sh" status; read -r -p " Enter..." _ ;;
+      "Service deinstallieren"*)
+        ask_confirm "Service deinstallieren?" && \
+        run_script "unban-ip-installer.sh" uninstall ;;
+      "Interval"*)
+        local interval; interval="$(gum input --placeholder='Minuten (Standard: 30)')" || continue
+        [ -z "${interval// }" ] && interval="30"
+        run_script "unban-ip-installer.sh" update "$interval" ;;
       "Eigene"*) do_custom_args "unban_ip.sh" ;;
       *)        return ;;
     esac

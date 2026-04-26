@@ -14,12 +14,20 @@ source "unban_ip.env"
 # Farben
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; BLUE=$'\033[0;34m'; NC=$'\033[0m'
 
+# Silent mode flag
+SILENT_MODE="${SILENT_MODE:-false}"
+
 mkdir -p "$STATE_DIR" >/dev/null 2>&1 || true
+
+log_output() {
+  [[ "$SILENT_MODE" == "true" ]] && return 0
+  echo "$@" >&2
+}
 
 usage() {
   cat <<EOF
 Verwendung:
-  sudo $0 [--domain DOMAIN] [--prefix-length N] [--test]
+  sudo $0 [--domain DOMAIN] [--prefix-length N] [--test] [--silent]
   sudo $0 --bans
   sudo $0 --unban <IP|CIDR|Domain>
 
@@ -29,6 +37,7 @@ Optionen:
   --bans               Nur Bans anzeigen (F2B + CrowdSec)
   --unban <Ziel>       Ziel entbannen & whitelisten (Domain/IP/CIDR)
   --test               Dry-Run (nur anzeigen, keine Änderungen)
+  --silent             Nur Fehler loggen (für Systemd-Timer)
   -h, --help           Hilfe
 EOF
 }
@@ -45,7 +54,7 @@ get_cs_allowlist_name() {
 
 resolve_all_ips() {
   local d="$1"
-  echo -e "${BLUE}Auflösen: ${d}${NC}" >&2
+  log_output -e "${BLUE}Auflösen: ${d}${NC}"
   need_cmd dig
   # IPv4: Strikter Regex
   dig +short A "$d"    2>/dev/null | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || true
@@ -65,7 +74,7 @@ except Exception:
   pass
 PY
   else
-    echo -e "${YELLOW}Hinweis: 'python3' fehlt – Präfixberechnung übersprungen.${NC}" >&2
+    log_output -e "${YELLOW}Hinweis: 'python3' fehlt – Präfixberechnung übersprungen.${NC}"
   fi
 }
 
@@ -101,12 +110,12 @@ f2b_unban() {
   command -v fail2ban-client >/dev/null 2>&1 || return 0
 
   if [[ "$test" == "true" ]]; then
-    echo -e "${GREEN}[TEST] F2B: unban '$t'.${NC}" >&2
+    log_output -e "${GREEN}[TEST] F2B: unban '$t'.${NC}"
   else
     local res
     res="$(fail2ban-client unban "$t" 2>/dev/null || echo 0)"
     if [[ "$res" =~ ^[0-9]+$ ]] && [[ "$res" -gt 0 ]]; then
-      echo -e "${GREEN}F2B: '$t' aus allen Jails entbannt (Anzahl: $res).${NC}" >&2
+      log_output -e "${GREEN}F2B: '$t' aus allen Jails entbannt (Anzahl: $res).${NC}"
     fi
   fi
 }
@@ -123,12 +132,12 @@ f2b_add_ignore() {
     fi
 
     if [[ "$test" == "true" ]]; then
-      echo -e "${GREEN}[TEST] F2B: add ignoreip '$v' -> '$j'.${NC}" >&2
+      log_output -e "${GREEN}[TEST] F2B: add ignoreip '$v' -> '$j'.${NC}"
       continue
     fi
 
     if fail2ban-client set "$j" addignoreip "$v" >/dev/null 2>&1; then
-      echo -e "${GREEN}F2B: ignoreip '$v' in '$j' gesetzt.${NC}" >&2
+      log_output -e "${GREEN}F2B: ignoreip '$v' in '$j' gesetzt.${NC}"
     else
       echo -e "${RED}F2B: addignoreip fehlgeschlagen ($v/$j).${NC}" >&2
     fi
@@ -147,12 +156,12 @@ f2b_del_ignore() {
     fi
 
     if [[ "$test" == "true" ]]; then
-      echo -e "${GREEN}[TEST] F2B: del ignoreip '$v' -> '$j'.${NC}" >&2
+      log_output -e "${GREEN}[TEST] F2B: del ignoreip '$v' -> '$j'.${NC}"
       continue
     fi
 
     if fail2ban-client set "$j" delignoreip "$v" >/dev/null 2>&1; then
-      echo -e "${GREEN}F2B: ignoreip '$v' aus '$j' entfernt.${NC}" >&2
+      log_output -e "${GREEN}F2B: ignoreip '$v' aus '$j' entfernt.${NC}"
     else
       echo -e "${RED}F2B: delignoreip fehlgeschlagen ($v/$j).${NC}" >&2
     fi
@@ -200,12 +209,12 @@ cs_unban_any() {
 
 # ---------------- Anzeige ----------------
 show_bans() {
-  echo -e "${YELLOW}=== Fail2Ban Status ===${NC}"
+  log_output -e "${YELLOW}=== Fail2Ban Status ===${NC}"
   if command -v fail2ban-client >/dev/null 2>&1; then
     local tot=0
     while IFS= read -r j; do
       [[ -z "$j" ]] && continue
-      echo -e "${BLUE}Jail: $j${NC}"
+      log_output -e "${BLUE}Jail: $j${NC}"
       local lst; lst="$(fail2ban-client status "$j" | sed -n 's/.*Banned IP list:\s*//p')"
       if [[ -n "$lst" ]]; then
         local -a ips_arr
@@ -213,15 +222,15 @@ show_bans() {
         printf "  - %s\n" "${ips_arr[@]}"
         tot=$((tot + ${#ips_arr[@]}))
       else
-        echo "  (leer)"
+        log_output "  (leer)"
       fi
     done < <(get_f2b_jails)
-    echo -e "${YELLOW}Gesamt Fail2Ban Bans: $tot${NC}"
+    log_output -e "${YELLOW}Gesamt Fail2Ban Bans: $tot${NC}"
   else
-    echo "Fail2Ban nicht installiert/gefunden."
+    log_output "Fail2Ban nicht installiert/gefunden."
   fi
 
-  echo -e "\n${YELLOW}=== CrowdSec Status ===${NC}"
+  log_output -e "\n${YELLOW}=== CrowdSec Status ===${NC}"
   if command -v cscli >/dev/null 2>&1; then
     local raw n; raw="$(cscli decisions list -o raw 2>/dev/null || true)"
     n=0
@@ -232,18 +241,18 @@ show_bans() {
       local ips; ips="$(echo "$raw" | awk -F',' 'NR>1 {sub(/^Ip:/, "", $3); print $3}')"
       if [[ -n "$ips" ]]; then
          while IFS= read -r line; do
-           echo "  - $line"
+           log_output "  - $line"
          done <<< "$ips"
          n="$(echo "$ips" | grep -c . || true)"
       else
-         echo "  (leer)"
+         log_output "  (leer)"
       fi
     else
-      echo "  (leer)"
+      log_output "  (leer)"
     fi
-    echo -e "${YELLOW}Gesamt CrowdSec Bans: ${n}${NC}"
+    log_output -e "${YELLOW}Gesamt CrowdSec Bans: ${n}${NC}"
   else
-    echo "CrowdSec nicht installiert/gefunden."
+    log_output "CrowdSec nicht installiert/gefunden."
   fi
 }
 
@@ -275,12 +284,12 @@ apply_targets() {
     f2b_add_ignore "$t" "$test"
     
     if [[ "$test" == "true" ]]; then
-      echo -e "${GREEN}[TEST] CS: allowlists add '$t' -> '$allowlist_name'${NC}" >&2
+      log_output -e "${GREEN}[TEST] CS: allowlists add '$t' -> '$allowlist_name'${NC}"
     else
       # nur hinzufügen, wenn noch nicht drin (API calls sparen)
       if ! grep -Fqw -- "$t" <<< "$existing_allowlist"; then
         cs_allowlist_add_value "$allowlist_name" "$t"
-        echo -e "${GREEN}CS: Allowlist '$allowlist_name' erweitert um: $t${NC}" >&2
+        log_output -e "${GREEN}CS: Allowlist '$allowlist_name' erweitert um: $t${NC}"
       fi
     fi
   done
@@ -295,10 +304,10 @@ cleanup_old_targets() {
     f2b_del_ignore "$t" "$test"
     
     if [[ "$test" == "true" ]]; then
-      echo -e "${GREEN}[TEST] CS: allowlists remove '$t' aus '$allowlist_name'${NC}" >&2
+      log_output -e "${GREEN}[TEST] CS: allowlists remove '$t' aus '$allowlist_name'${NC}"
     else
       cs_allowlist_remove_value "$allowlist_name" "$t"
-      echo -e "${YELLOW}CS: Aus Allowlist '$allowlist_name' entfernt: $t${NC}" >&2
+      log_output -e "${YELLOW}CS: Aus Allowlist '$allowlist_name' entfernt: $t${NC}"
     fi
 
     # 2. Sicherstellen: nicht gebannt (falls währenddessen gebannt wurde)
@@ -341,6 +350,7 @@ main() {
       --domain) DOMAIN="${2:-}"; [[ -z "$DOMAIN" ]] && { echo -e "${RED}--domain braucht Wert.${NC}" >&2; exit 1; }; shift 2;;
       --prefix-length) V6_PLEN="${2:-}"; [[ "$V6_PLEN" =~ ^[0-9]+$ ]] || { echo -e "${RED}--prefix-length Zahl erwartet.${NC}" >&2; exit 1; }; shift 2;;
       --test) TEST_MODE="true"; shift;;
+      --silent) SILENT_MODE="true"; shift;;
       -h|--help) usage; exit 0;;
       *) echo -e "${RED}Unbekannte Option: $1${NC}" >&2; usage; exit 1;;
     esac
@@ -367,10 +377,10 @@ main() {
       fi
       
       if [[ "${#targets[@]}" -eq 0 ]]; then
-        echo -e "${YELLOW}Keine Targets gefunden.${NC}" >&2
+        log_output -e "${YELLOW}Keine Targets gefunden.${NC}"
         exit 0
       fi
-      echo -e "${BLUE}Targets: ${targets[*]}${NC}" >&2
+      log_output -e "${BLUE}Targets: ${targets[*]}${NC}"
       
       # CrowdSec Liste erstellen, falls nicht da
       if [[ "$TEST_MODE" != "true" ]]; then
@@ -380,8 +390,8 @@ main() {
       apply_targets "$TEST_MODE" "$CS_LIST_NAME" "${targets[@]}"
       ;;
     auto)
-      echo -e "${BLUE}=== Automatik für '${DOMAIN}' ===${NC}" >&2
-      echo -e "${BLUE}CS Allowlist Name: '${CS_LIST_NAME}'${NC}" >&2
+      log_output -e "${BLUE}=== Automatik für '${DOMAIN}' ===${NC}"
+      log_output -e "${BLUE}CS Allowlist Name: '${CS_LIST_NAME}'${NC}"
       
       mapfile -t targets < <(build_targets_for_domain "$DOMAIN" "$V6_PLEN")
       
@@ -391,7 +401,7 @@ main() {
         # Hier brechen wir lieber ab, um Sicherheit zu wahren.
         exit 1
       fi
-      echo -e "${BLUE}Aktuelle DNS-Targets: ${targets[*]}${NC}" >&2
+      log_output -e "${BLUE}Aktuelle DNS-Targets: ${targets[*]}${NC}"
 
       # CrowdSec Liste sicherstellen
       if [[ "$TEST_MODE" != "true" ]]; then
@@ -417,13 +427,13 @@ main() {
         rm -f "$tfA" "$tfB"
         
         if [[ "${#old_only[@]}" -gt 0 ]]; then
-          echo -e "${YELLOW}Entferne veraltete Targets: ${old_only[*]}${NC}" >&2
+          log_output -e "${YELLOW}Entferne veraltete Targets: ${old_only[*]}${NC}"
           cleanup_old_targets "$TEST_MODE" "$CS_LIST_NAME" "${old_only[@]}"
         fi
       fi
 
       save_curr_set "$sf" "${targets[@]}"
-      echo -e "${GREEN}=== Fertig ===${NC}" >&2
+      log_output -e "${GREEN}=== Fertig ===${NC}"
       ;;
   esac
 }
