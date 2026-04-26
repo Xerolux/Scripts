@@ -219,20 +219,17 @@ ask_screen()  {
 run_script() {
   local script="$1"; shift
   local path="$SCRIPT_DIR/$script"
-  [ -f "$path" ] || { _fail "Nicht gefunden: $path"; read -r -p " Enter..."; return 1; }
+  [ -f "$path" ] || { echo "Nicht gefunden: $path"; read -r -p " Enter..."; return 1; }
   chmod 755 "$path" 2>/dev/null || true
 
   echo
-  draw_box "$script $*" "$C" "$(_dim "PGO=$USE_PGO  LTO=$USE_LTO  Force=$FORCE_REBUILD")"
-  echo
-
   FORCE_REBUILD="$FORCE_REBUILD" USE_PGO="$USE_PGO" USE_LTO="$USE_LTO" bash "$path" "$@"
   local rc=$?
   echo
   if [ "$rc" -eq 0 ]; then
-    draw_box "Fertig" "$G" "$(_ok "✔") Build erfolgreich"
+    _ok "✔ Fertig (OK)"
   else
-    draw_box "Fehler" "$R" "$(_fail "✘") Exit-Code: $rc"
+    _fail "✘ Fertig (Exit: $rc)"
   fi
   read -r -p " Enter fuer Menue..." _
   return $rc
