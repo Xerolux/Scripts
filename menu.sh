@@ -202,7 +202,7 @@ choose() {
     --cursor=" ❯ " --cursor.foreground="$C" --selected.foreground="$G" --height=30
 }
 
-choose_or_back() { choose "$@" "$(_dim "← Zurueck")" || echo "Zurueck"; }
+choose_or_back() { choose "$@" "Zurueck" || echo "Zurueck"; }
 
 ask_path()    { gum input --placeholder="Pfad (leer = latest)" 3>/dev/null || echo ""; }
 ask_confirm() { local msg="$1"; shift; gum confirm "$msg" "$@" 2>/dev/null; }
@@ -273,7 +273,10 @@ run_in_screen() {
   screen -dmS "$sname" bash -c "
     export FORCE_REBUILD='${FORCE_REBUILD}' USE_PGO='${USE_PGO}' USE_LTO='${USE_LTO}'
     bash '${path}'${args_str} ${log_redirect}
-    echo ''; echo '=== Fertig ==='; echo 'Strg+A D = Trennen'; read -r _
+    _rc=\$?
+    echo ''; echo '=== Fertig ==='; echo 'Strg+A D = Trennen'; echo ''
+    if [ \$_rc -eq 0 ]; then echo '✔ Build erfolgreich - Session schliesst in 30s'; else echo '✘ Build fehlgeschlagen - Session bleibt offen'; read -r _; fi
+    sleep 30
   "
 
   sleep 0.3
