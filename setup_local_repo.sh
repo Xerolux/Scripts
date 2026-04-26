@@ -126,17 +126,15 @@ init_gpg() {
   local batch_file="/tmp/gpg-batch-$$"
   cat > "$batch_file" <<GPGCONF
 %no-protection
-Key-Type: RSA
-Key-Length: 4096
-Subkey-Type: RSA
-Subkey-Length: 4096
+Key-Type: Ed25519
+Subkey-Type: Curve25519
 Name-Real: ${GPG_KEY_NAME}
 Name-Email: ${GPG_KEY_EMAIL}
 Expire-Date: 0
 %commit
 GPGCONF
 
-  log "Erstelle 4096-bit RSA Schluessel..."
+  log "Erstelle Ed25519/Curve25519 Schluessel..."
   gpg_cmd --gen-key --batch "$batch_file"
   rm -f "$batch_file"
 
