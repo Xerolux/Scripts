@@ -37,6 +37,8 @@ GPG_PUBLIC_KEY="/etc/apt/keyrings/xerolux-repo.gpg"
 APT_KEYRING_DIR="/etc/apt/keyrings"
 REPO_ARCH="$(dpkg --print-architecture 2>/dev/null || echo arm64)"
 LOCK_FILE="${REPO_DIR:-/var/local/custom-repo}/.repo.lock"
+REPO_WEB_USER="${REPO_WEB_USER:-}"
+REPO_WEB_GROUP="${REPO_WEB_GROUP:-}"
 
 # ------------------------------------------------------------------------------
 # Hilfsfunktionen
@@ -332,6 +334,19 @@ generate_checksums() {
 }
 
 # ------------------------------------------------------------------------------
+# Berechtigungen fuer Web-Server setzen
+# ------------------------------------------------------------------------------
+fix_permissions() {
+  [ -z "$REPO_WEB_USER" ] || [ -z "$REPO_WEB_GROUP" ] && return 0
+
+  log "Setze Berechtigungen ($REPO_WEB_USER:$REPO_WEB_GROUP)..."
+  chown -R "$REPO_WEB_USER:$REPO_WEB_GROUP" "$REPO_DIR"
+  find "$REPO_DIR" -type d -exec chmod 755 {} \;
+  find "$REPO_DIR" -type f -exec chmod 644 {} \;
+  chmod 700 "$REPO_DIR/.gnupg" 2>/dev/null || true
+}
+
+# ------------------------------------------------------------------------------
 # Alle .deb-Pakete im Repo signieren (dpkg-sig bevorzugt, debsigs als Fallback)
 # ------------------------------------------------------------------------------
 sign_debs() {
@@ -403,6 +418,7 @@ rebuild_repo() {
   generate_checksums
   generate_release
   sign_release
+  fix_permissions
 }
 
 # ------------------------------------------------------------------------------
