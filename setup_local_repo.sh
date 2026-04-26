@@ -219,14 +219,14 @@ generate_release() {
   now="$(date -u '+%a, %d %b %Y %H:%M:%S UTC')"
 
   cat > Release <<RELEASEHEAD
-Origin: Custom Build Repository
-Label: Custom Build Repository
+Origin: Xerolux Repository
+Label: Xerolux Repository
 Suite: stable
-Codename: custom
+Codename: xerolux
 Date: $now
 Architectures: $REPO_ARCH
 Components: ./
-Description: Lokales Repository fuer Custom-Build-Pakete
+Description: Xerolux APT Repository fuer Custom-Build-Pakete
 RELEASEHEAD
 
   local md5_sum sha1_sum sha256_sum sha512_sum size
