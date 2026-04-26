@@ -194,7 +194,7 @@ draw_box() {
     "$(gum style --bold --foreground "$color" -- " $title ")${nl}${body}"
 }
 
-sep() { _dim "────────────────────────────────"; }
+sep() { echo "────────────────────────────────"; }
 
 choose() {
   local hdr="${1:-}"; shift
@@ -514,17 +514,17 @@ menu_php() {
     clear; draw_header "PHP ${ver:-}" "$(_col "$P" "$pkg_count") Pakete"; echo
     local choice
     choice=$(choose_or_back "" \
-      "$(_bold "▶ Komplett-Build")" \
-      "$(_warn "⚠ Force-Rebuild")" \
+      "Komplett-Build" \
+      "Force-Rebuild (alles neu)" \
       "Einzelne Extension(en)..." \
-      "$(_dim "─ Verwaltung ─")" \
+      "$(sep)" \
       "Installieren" \
       "Status" \
       "Pakete auflisten" \
       "Extensions auflisten" \
       "Konfiguration pruefen" \
       "Verifikation" \
-      "$(_dim "─ Backup ─")" \
+      "$(sep)" \
       "Backup erstellen" \
       "Backup wiederherstellen" \
       "Backups auflisten" \
@@ -534,14 +534,13 @@ menu_php() {
       "Komplett"*)   run_build "setup_php.sh" "php_build" package ;;
       "Force"*)      FORCE_REBUILD=yes run_build "setup_php.sh" "php_build" package ;;
       "Einzelne"*)   menu_php_ext_select ;;
-      *"────"*) continue ;;
+      *"──"*)        continue ;;
       "Installieren"*) run_script "setup_php.sh" install ;;
       "Status"*)     run_script "setup_php.sh" status ;;
       "Pakete"*)     run_script "setup_php.sh" list-packages ;;
       "Extensions"*) run_script "setup_php.sh" list-extensions ;;
       "Konfiguration"*) run_script "setup_php.sh" check-config ;;
       "Verifikation"*) run_script "setup_php.sh" verify ;;
-      *"────"*) continue ;;
       "Backup erstellen"*) run_script "setup_php.sh" backup ;;
       "wiederher"*)  do_restore "setup_php.sh" "php_build" restore ;;
       "Backups"*)    run_script "setup_php.sh" list-backups ;;
@@ -558,7 +557,7 @@ menu_nginx() {
     clear; draw_header "Nginx ${ver:-}"; echo
     local choice
     choice=$(choose_or_back "" \
-      "$(_bold "▶ Pakete bauen")" \
+      "Pakete bauen" \
       "Installieren" \
       "Status" \
       "$(_dim "─ Details ─")" \
@@ -597,7 +596,7 @@ menu_dovecot() {
     clear; draw_header "Dovecot"; echo
     local choice
     choice=$(choose_or_back "" \
-      "$(_bold "▶ Komplett-Build")" \
+      "Komplett-Build" \
       "Nur Dovecot-Core" \
       "Nur Pigeonhole" \
       "Nur kompilieren" \
@@ -641,7 +640,7 @@ menu_postfix() {
     clear; draw_header "Postfix ${ver:-}"; echo
     local choice
     choice=$(choose_or_back "" \
-      "$(_bold "▶ Pakete bauen")" \
+      "Pakete bauen" \
       "Installieren" \
       "Status" \
       "$(_dim "─ Details ─")" \
@@ -849,17 +848,17 @@ menu_localrepo() {
     clear; draw_header "Lokales APT-Repository" "$(repo_info)"; echo
     local choice
     choice=$(choose_or_back "" \
-      "$(_bold "Repo einrichten")" \
+      "Repo einrichten" \
       "$(_ok "Pakete synchronisieren")" \
-      "$(_col "$C" "Pakete durchsuchen")" \
-      "$(_col "$B" "Pakete installieren")" \
+      "Pakete durchsuchen" \
+      "Pakete installieren" \
       "$(_dim "─ Verwaltung ─")" \
       "Status (Detail)" \
       "GPG Schluessel erzeugen" \
       "Public Key exportieren" \
       "Release neu signieren" \
       "Alle DEBs signieren" \
-      "$(_fail "Repo entfernen")" \
+      "Repo entfernen" \
       "Eigene Argumente...")
     case "$choice" in
       "einrichten"*)       run_script "setup_local_repo.sh" install ;;
@@ -886,7 +885,7 @@ menu_backuprestore() {
     clear; draw_header "Backup / Restore"; echo
     local choice
     choice=$(choose_or_back "" \
-      "$(_bold "▲ Full Backup")" \
+      "Full Backup" \
       "Nur Postfix" \
       "Nur Dovecot" \
       "Nur Nginx" \
@@ -956,21 +955,21 @@ menu_clean() {
     clear; draw_header "Build-Artefakte loeschen"; echo
     local choice
     choice=$(choose_or_back "" \
-      "$(_col "$P" "PHP:") Staging" \
-      "$(_col "$P" "PHP:") Build-Dir" \
-      "$(_col "$P" "PHP:") PECL-Quellen" \
-      "$(_col "$P" "PHP:") PGO-Profile" \
-      "$(_col "$P" "PHP:") Pakete (.deb)" \
-      "$(_fail "PHP: ALLES")" \
-      "$(_dim "─ Weitere ─")" \
-      "$(_col "$G" "Nginx:") Staging" \
-      "$(_col "$Y" "Dovecot:") Staging" \
-      "$(_col "$B" "Postfix:") Staging" \
+      "PHP: Staging" \
+      "PHP: Build-Dir" \
+      "PHP: PECL-Quellen" \
+      "PHP: PGO-Profile" \
+      "PHP: Pakete (.deb)" \
+      "PHP: ALLES" \
+      "$(sep)" \
+      "Nginx: Staging" \
+      "Dovecot: Staging" \
+      "Postfix: Staging" \
       "Alle Staging" \
-      "$(_fail "ALLE Artefakte")")
+      "ALLE Artefakte")
 
     [ "$choice" = "Zurueck" ] && return
-    ask_confirm "$(_dim "$choice")  wirklich loeschen?" || continue
+    ask_confirm "$choice  wirklich loeschen?" || continue
 
     local PE="setup_php.env" NE="setup_nginx.env" DE="setup_dovecot.env" FE="setup_postfix.env"
 
@@ -1101,10 +1100,10 @@ main_menu() {
 
     local choice
     choice=$(choose "" \
-      "$(_col "$P" "●") PHP ${php_ver:-}" \
-      "$(_col "$G" "●") Nginx ${nginx_ver:-}" \
-      "$(_col "$Y" "●") Dovecot" \
-      "$(_col "$B" "●") Postfix ${postfix_ver:-}" \
+      "PHP ${php_ver:-}" \
+      "Nginx ${nginx_ver:-}" \
+      "Dovecot" \
+      "Postfix ${postfix_ver:-}" \
       "$(sep)" \
       "Z-Push ActiveSync" \
       "Backup / Restore" \
@@ -1118,14 +1117,14 @@ main_menu() {
       "Settings" \
       "System-Info" \
       "Updates pruefen" \
-      "$(_fail "✘ Beenden")") || break
+      "Beenden") || break
 
     case "$choice" in
       PHP*)       menu_php ;;
       Nginx*)     menu_nginx ;;
       Dovecot*)   menu_dovecot ;;
       Postfix*)   menu_postfix ;;
-      *"────"*) continue ;;
+      *"──"*)     continue ;;
       Z-Push*)    menu_zpush ;;
       Backup*)    menu_backuprestore ;;
       Lokales*)   menu_localrepo ;;
@@ -1136,7 +1135,7 @@ main_menu() {
       Settings*)  menu_settings ;;
       System*)    menu_sysinfo ;;
       Updates*)   check_all_updates ;;
-      Beenden*|"✘"*) break ;;
+      Beenden*)   break ;;
     esac
   done
 }
