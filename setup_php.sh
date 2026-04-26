@@ -72,7 +72,7 @@ PECL_EXTNAME[opcache]="opcache"
 PECL_DEPS[opcache]="php${PHP_VER_SHORT}-custom"
 PECL_GITURL[opcache]="built-in"
 PECL_CONFIGURE[opcache]=""
-PECL_MAIN_SHARED[opcache]="yes"
+PECL_MAIN_SHARED[opcache]="no"
 
 # --- 2. APCu -----------------------------------------------------------------
 PECL_DIRNAME[apcu]="apcu"
@@ -1059,7 +1059,6 @@ build_php() {
   CONF_ARGS="$CONF_ARGS --enable-pcntl"
   CONF_ARGS="$CONF_ARGS --with-enchant"
   CONF_ARGS="$CONF_ARGS --with-ffi"
-  CONF_ARGS="$CONF_ARGS --enable-opcache=shared"
   CONF_ARGS="$CONF_ARGS --with-password-argon2"
   CONF_ARGS="$CONF_ARGS --enable-phar"
   CONF_ARGS="$CONF_ARGS --enable-posix"
