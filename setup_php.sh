@@ -1397,9 +1397,19 @@ DATETIME_SHIM
         target="$target/$subdir"
       fi
       if [ ! -d "$target" ]; then
-        log "  [SKIP] $ext – Quellen nicht gefunden ($target)"
-        _pecl_skip+=("$ext")
-        continue
+        log "  Klonne $ext von ${PECL_GITURL[$ext]} (${PECL_GITREF[$ext]:-master})..."
+        (
+          cd "$pecl_dir"
+          GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --depth 1 --branch "${PECL_GITREF[$ext]:-master}" "${PECL_GITURL[$ext]}" "$ext_dir_src" 2>&1 | tee -a "$LOG_FILE" || true
+          if [ "${PECL_SUBMODULES[$ext]:-}" = "yes" ] && [ -d "$pecl_dir/$ext_dir_src/.git" ]; then
+            git -C "$pecl_dir/$ext_dir_src" submodule update --init --recursive --depth 1 2>&1 | tee -a "$LOG_FILE" || true
+          fi
+        )
+        if [ ! -d "$target" ]; then
+          log "  [SKIP] $ext – Klonen fehlgeschlagen ($target)"
+          _pecl_skip+=("$ext")
+          continue
+        fi
       fi
       if [ "${PECL_CMAKE[$ext]:-}" = "yes" ] && [ ! -f "$target/CMakeLists.txt" ]; then
         log "  [WARN] $ext – CMakeLists.txt fehlt, Verzeichnis unvollstaendig – entferne und lade neu"
