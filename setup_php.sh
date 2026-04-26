@@ -72,7 +72,7 @@ PECL_EXTNAME[opcache]="opcache"
 PECL_DEPS[opcache]="php${PHP_VER_SHORT}-custom"
 PECL_GITURL[opcache]="built-in"
 PECL_CONFIGURE[opcache]=""
-PECL_MAIN_SHARED[opcache]="no"
+PECL_MAIN_SHARED[opcache]="yes"
 
 # --- 2. APCu -----------------------------------------------------------------
 PECL_DIRNAME[apcu]="apcu"
@@ -1059,6 +1059,7 @@ build_php() {
   CONF_ARGS="$CONF_ARGS --enable-pcntl"
   CONF_ARGS="$CONF_ARGS --with-enchant"
   CONF_ARGS="$CONF_ARGS --with-ffi"
+  CONF_ARGS="$CONF_ARGS --enable-opcache=shared"
   CONF_ARGS="$CONF_ARGS --with-password-argon2"
   CONF_ARGS="$CONF_ARGS --enable-phar"
   CONF_ARGS="$CONF_ARGS --enable-posix"
@@ -1156,6 +1157,21 @@ stage_install() {
   local inst_rc=${PIPESTATUS[0]}
   set -e
   [ "$inst_rc" -eq 0 ] || die "make install fehlgeschlagen (Exit $inst_rc)"
+
+  local php_config
+  php_config="$(resolve_staged_php_tool "php-config" || true)"
+  if [ -x "$php_config" ]; then
+    local ext_dir
+    ext_dir="$($php_config --extension-dir 2>/dev/null || echo "$PHP_EXTENSION_DIR")"
+    ext_dir="${ext_dir#"$STAGE_PHP"}"
+    local stage_ext="$STAGE_PHP${ext_dir}"
+    mkdir -p "$stage_ext"
+
+    if [ -f "modules/opcache.so" ] && [ ! -f "$stage_ext/opcache.so" ]; then
+      cp "modules/opcache.so" "$stage_ext/"
+      log "opcache.so manuell ins Staging kopiert"
+    fi
+  fi
 
   rm -rf "${STAGE_PHP}${PHP_SYSCONFDIR}"
   log "/etc/php aus Staging entfernt"
