@@ -66,7 +66,7 @@ install_zpush_from_github_release() {
   apt-get update -qq
   apt-get install -y curl tar php-fpm php-imap php-mbstring php-curl php-xml php-soap php-intl
 
-  curl -fsSL "$archive_url" -o "$archive_path"
+  curl -fsSL --connect-timeout 30 --max-time 300 "$archive_url" -o "$archive_path" || fail "Z-Push download fehlgeschlagen: $archive_url"
   rm -rf "$extract_dir"
   tar -xzf "$archive_path" -C /tmp || fail "Tar-Extraktion fehlgeschlagen"
 
