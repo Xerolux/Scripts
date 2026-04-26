@@ -734,7 +734,7 @@ create_backup() {
     "/usr/bin/php${PHP_VER_SHORT}" -m > "$backup_dir/php-modules.txt" 2>&1 || true
   fi
 
-  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     cp -a "$PACKAGE_DIR" "$backup_dir/deb-packages" || true
   fi
 
@@ -1666,7 +1666,7 @@ EXTPOSTRM
 # SHA256-Checksummen fuer alle erzeugten .deb-Pakete
 # ------------------------------------------------------------------------------
 generate_checksums() {
-  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     log "Erstelle SHA256SUMS fuer Pakete..."
     cd "$PACKAGE_DIR"
     sha256sum ./*.deb > SHA256SUMS
@@ -2662,10 +2662,10 @@ cmd_list_packages() {
   echo "=============================================="
   echo " Erzeugte .deb-Pakete ($PACKAGE_DIR)"
   echo "=============================================="
-  if [ -d "$PACKAGE_DIR" ] && compgen -G "$PACKAGE_DIR/*.deb" >/dev/null 2>&1; then
-    ls -lh "$PACKAGE_DIR"/*.deb
+  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
+    find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -exec ls -lh {} \;
     echo ""
-    echo "Gesamt: $(ls "$PACKAGE_DIR"/*.deb 2>/dev/null | wc -l) Pakete"
+    echo "Gesamt: $(find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f | wc -l) Pakete"
   else
     echo "  (keine Pakete vorhanden)"
   fi

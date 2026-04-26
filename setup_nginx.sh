@@ -420,7 +420,7 @@ create_backup() {
     nginx -v > "$backup_dir/nginx-version.txt" 2>&1 || true
     nginx -V > "$backup_dir/nginx-compile.txt" 2>&1 || true
   fi
-  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     cp -a "$PACKAGE_DIR" "$backup_dir/deb-packages" || true
   fi
 
@@ -956,7 +956,7 @@ MODPOSTRM
 # SHA256-Checksummen fuer alle erzeugten .deb-Pakete
 # ------------------------------------------------------------------------------
 generate_checksums() {
-  if [ -d "$PACKAGE_DIR" ] && ls "$PACKAGE_DIR"/*.deb >/dev/null 2>&1; then
+  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     log "Erstelle SHA256SUMS fuer Pakete..."
     cd "$PACKAGE_DIR"
     sha256sum ./*.deb > SHA256SUMS
