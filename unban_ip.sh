@@ -14,10 +14,13 @@ source "unban_ip.env"
 # Farben
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; BLUE=$'\033[0;34m'; NC=$'\033[0m'
 
-# Silent mode flag
 SILENT_MODE="${SILENT_MODE:-false}"
 
 mkdir -p "$STATE_DIR" >/dev/null 2>&1 || true
+
+_TMPFILES=()
+cleanup_tmpfiles() { rm -f "${_TMPFILES[@]}" 2>/dev/null || true; }
+trap cleanup_tmpfiles EXIT
 
 log_output() {
   [[ "$SILENT_MODE" == "true" ]] && return 0
@@ -46,7 +49,6 @@ require_root() { if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then echo -e "${RED}Root n�
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo -e "${RED}Fehlt: $1${NC}" >&2; exit 1; }; }
 state_file_for(){ echo "${STATE_DIR}/${1}.set"; }
 
-# Generiert den Allowlist-Namen basierend auf der aktuellen Domain
 get_cs_allowlist_name() {
   local d="$1"
   echo "dyn-whitelist-${d//[^a-zA-Z0-9_-]/_}"
@@ -55,15 +57,13 @@ get_cs_allowlist_name() {
 resolve_all_ips() {
   local d="$1"
   log_output -e "${BLUE}Auflösen: ${d}${NC}"
-  need_cmd dig
-  # IPv4: Strikter Regex
   dig +short A "$d"    2>/dev/null | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || true
-  # IPv6: Etwas strikterer Regex (Hex und Doppelpunkte, mind. 2 Zeichen)
   dig +short AAAA "$d" 2>/dev/null | grep -Ei '^[0-9a-f:]{2,}$' || true
 }
 
 calculate_ipv6_prefix_base() {
   local ipv6="$1" plen="$2"
+
   if command -v python3 >/dev/null 2>&1; then
     python3 - "$ipv6" "$plen" <<'PY'
 import ipaddress, sys
@@ -73,14 +73,19 @@ try:
 except Exception:
   pass
 PY
+  elif command -v ip >/dev/null 2>&1; then
+    local net
+    net="$(ip -6 route get "${ipv6}" 2>/dev/null | head -1 | awk '{print $1}')" || true
+    if [[ -n "$net" ]]; then
+      printf '%s\n' "$net"
+    fi
   else
-    log_output -e "${YELLOW}Hinweis: 'python3' fehlt – Präfixberechnung übersprungen.${NC}"
+    log_output -e "${YELLOW}Hinweis: Weder 'python3' noch 'ip' vorhanden – Präfixberechnung übersprungen.${NC}"
   fi
 }
 
 # ---------------- Fail2Ban ----------------
 
-# Cache für Jail-Liste, um Aufrufe zu minimieren
 _F2B_JAILS_CACHE=""
 get_f2b_jails() {
   if [[ -z "$_F2B_JAILS_CACHE" ]]; then
@@ -88,8 +93,10 @@ get_f2b_jails() {
       _F2B_JAILS_CACHE=$(fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:\s*//p' | tr ',' ' ')
     fi
   fi
-  # Ausgabe als Liste für Schleifen
-  echo "$_F2B_JAILS_CACHE" | xargs -n1 echo 2>/dev/null || true
+  local j
+  for j in $_F2B_JAILS_CACHE; do
+    [[ -n "$j" ]] && printf '%s\n' "$j"
+  done
 }
 
 f2b_is_banned_in_jail() {
@@ -110,13 +117,25 @@ f2b_unban() {
   command -v fail2ban-client >/dev/null 2>&1 || return 0
 
   if [[ "$test" == "true" ]]; then
-    log_output -e "${GREEN}[TEST] F2B: unban '$t'.${NC}"
-  else
-    local res
-    res="$(fail2ban-client unban "$t" 2>/dev/null || echo 0)"
-    if [[ "$res" =~ ^[0-9]+$ ]] && [[ "$res" -gt 0 ]]; then
-      log_output -e "${GREEN}F2B: '$t' aus allen Jails entbannt (Anzahl: $res).${NC}"
+    log_output -e "${GREEN}[TEST] F2B: unban '$t' (pro Jail).${NC}"
+    return 0
+  fi
+
+  local unban_count=0
+  while IFS= read -r j; do
+    [[ -z "$j" ]] && continue
+    if f2b_is_banned_in_jail "$j" "$t"; then
+      if fail2ban-client set "$j" unbanip "$t" >/dev/null 2>&1; then
+        log_output -e "${GREEN}F2B: '$t' aus Jail '$j' entbannt.${NC}"
+        unban_count=$((unban_count + 1))
+      else
+        log_output -e "${YELLOW}F2B: unbanip fehlgeschlagen in '$j' für '$t'.${NC}"
+      fi
     fi
+  done < <(get_f2b_jails)
+
+  if [[ "$unban_count" -eq 0 ]]; then
+    fail2ban-client unban "$t" >/dev/null 2>&1 || true
   fi
 }
 
@@ -127,7 +146,6 @@ f2b_add_ignore() {
   while IFS= read -r j; do
     [[ -z "$j" ]] && continue
     if f2b_ignore_contains "$j" "$v"; then
-      # echo -e "${YELLOW}F2B: ignoreip enthält '$v' in '$j' bereits.${NC}" >&2
       continue
     fi
 
@@ -144,7 +162,6 @@ f2b_add_ignore() {
   done < <(get_f2b_jails)
 }
 
-# !!! NEU HINZUGEFÜGT: Funktion zum Entfernen aus ignoreip !!!
 f2b_del_ignore() {
   local v="$1" test="$2"
   command -v fail2ban-client >/dev/null 2>&1 || return 0
@@ -152,7 +169,7 @@ f2b_del_ignore() {
   while IFS= read -r j; do
     [[ -z "$j" ]] && continue
     if ! f2b_ignore_contains "$j" "$v"; then
-      continue # Ist gar nicht drin, also nichts tun
+      continue
     fi
 
     if [[ "$test" == "true" ]]; then
@@ -169,7 +186,6 @@ f2b_del_ignore() {
 }
 
 # ---------------- CrowdSec (allowlists) ----------------
-# Hilfsfunktionen benötigen den Namen der Allowlist als Argument oder nutzen globale Var
 
 cs_allowlist_exists() {
   local name="$1"
@@ -199,7 +215,6 @@ cs_unban_any() {
     echo -e "${GREEN}[TEST] CS: decisions delete '$t'${NC}" >&2
     return 0
   fi
-  # CrowdSec unban ist global, keine Allowlist nötig
   if [[ "$t" == */* ]]; then
     cscli decisions delete --range "$t" >/dev/null 2>&1 || true
   else
@@ -235,9 +250,6 @@ show_bans() {
     local raw n; raw="$(cscli decisions list -o raw 2>/dev/null || true)"
     n=0
     if [[ -n "$raw" ]]; then
-      # Header überspringen falls vorhanden, ansonsten zählen
-      # cscli raw output ist oft: id,source,ip_text,...
-      # wir filtern auf einfache IP Liste
       local ips; ips="$(echo "$raw" | awk -F',' 'NR>1 {sub(/^Ip:/, "", $3); print $3}')"
       if [[ -n "$ips" ]]; then
          while IFS= read -r line; do
@@ -276,17 +288,14 @@ apply_targets() {
   for t in "$@"; do
     [[ -z "$t" ]] && continue
     
-    # 1. Unban (F2B + CS)
     f2b_unban "$t" "$test"
     cs_unban_any "$t" "$test"
     
-    # 2. Whitelist Add
     f2b_add_ignore "$t" "$test"
     
     if [[ "$test" == "true" ]]; then
       log_output -e "${GREEN}[TEST] CS: allowlists add '$t' -> '$allowlist_name'${NC}"
     else
-      # nur hinzufügen, wenn noch nicht drin (API calls sparen)
       if ! grep -Fqw -- "$t" <<< "$existing_allowlist"; then
         cs_allowlist_add_value "$allowlist_name" "$t"
         log_output -e "${GREEN}CS: Allowlist '$allowlist_name' erweitert um: $t${NC}"
@@ -300,7 +309,6 @@ cleanup_old_targets() {
   local t
   for t in "$@"; do
     [[ -z "$t" ]] && continue
-    # 1. Whitelist Remove
     f2b_del_ignore "$t" "$test"
     
     if [[ "$test" == "true" ]]; then
@@ -310,7 +318,6 @@ cleanup_old_targets() {
       log_output -e "${YELLOW}CS: Aus Allowlist '$allowlist_name' entfernt: $t${NC}"
     fi
 
-    # 2. Sicherstellen: nicht gebannt (falls währenddessen gebannt wurde)
     f2b_unban "$t" "$test"
     cs_unban_any "$t" "$test"
   done
@@ -356,7 +363,6 @@ main() {
     esac
   done
 
-  # Generiere Namen dynamisch basierend auf der Domain
   local CS_LIST_NAME
   CS_LIST_NAME="$(get_cs_allowlist_name "$DOMAIN")"
 
@@ -365,15 +371,12 @@ main() {
       show_bans
       ;;
     unban)
-      # Fallunterscheidung: Ist es eine IP oder eine Domain?
+      local unban_domain="$DOMAIN"
       if [[ ! "$UNBAN_ARG" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ ! "$UNBAN_ARG" =~ : ]] && [[ ! "$UNBAN_ARG" =~ / ]]; then
-         # Sieht aus wie eine Domain -> Auflösen
+         unban_domain="$UNBAN_ARG"
          mapfile -t targets < <(build_targets_for_domain "$UNBAN_ARG" "$V6_PLEN")
-         # Wenn man explizit --unban domain.com macht, sollte man vielleicht 
-         # auch den Allowlist-Namen anpassen? Hier lassen wir es bei der Hauptdomain, 
-         # oder man müsste --domain passend setzen.
       else
-        targets=( "$UNBAN_ARG" )
+         targets=( "$UNBAN_ARG" )
       fi
       
       if [[ "${#targets[@]}" -eq 0 ]]; then
@@ -381,13 +384,15 @@ main() {
         exit 0
       fi
       log_output -e "${BLUE}Targets: ${targets[*]}${NC}"
+
+      local unban_cs_name
+      unban_cs_name="$(get_cs_allowlist_name "$unban_domain")"
       
-      # CrowdSec Liste erstellen, falls nicht da
       if [[ "$TEST_MODE" != "true" ]]; then
-        cs_allowlist_create "$CS_LIST_NAME" "$DOMAIN"
+        cs_allowlist_create "$unban_cs_name" "$unban_domain"
       fi
 
-      apply_targets "$TEST_MODE" "$CS_LIST_NAME" "${targets[@]}"
+      apply_targets "$TEST_MODE" "$unban_cs_name" "${targets[@]}"
       ;;
     auto)
       log_output -e "${BLUE}=== Automatik für '${DOMAIN}' ===${NC}"
@@ -397,32 +402,26 @@ main() {
       
       if [[ "${#targets[@]}" -eq 0 ]]; then
         echo -e "${RED}Fehler: Konnte keine IPs für $DOMAIN auflösen.${NC}" >&2
-        # Vorsicht: Wenn DNS ausfällt, wollen wir nicht alle alten löschen? 
-        # Hier brechen wir lieber ab, um Sicherheit zu wahren.
         exit 1
       fi
       log_output -e "${BLUE}Aktuelle DNS-Targets: ${targets[*]}${NC}"
 
-      # CrowdSec Liste sicherstellen
       if [[ "$TEST_MODE" != "true" ]]; then
         cs_allowlist_create "$CS_LIST_NAME" "$DOMAIN"
       fi
 
-      # Vorherige Targets laden
       local sf; sf="$(state_file_for "$DOMAIN")"
       mapfile -t prev < <(load_prev_set "$sf" || true)
 
-      # 1. Neue anwenden
       apply_targets "$TEST_MODE" "$CS_LIST_NAME" "${targets[@]}"
 
-      # 2. Alte entfernen (= prev - current)
       if [[ "${#prev[@]}" -gt 0 ]]; then
         local tfA tfB
         tfA="$(mktemp)"; tfB="$(mktemp)"
+        _TMPFILES+=("$tfA" "$tfB")
         printf '%s\n' "${prev[@]}"    | grep -Ev '^[[:space:]]*$' | sort -u > "$tfA"
         printf '%s\n' "${targets[@]}" | grep -Ev '^[[:space:]]*$' | sort -u > "$tfB"
         
-        # Zeilen, die in A sind, aber nicht in B
         mapfile -t old_only < <(grep -Fvx -f "$tfB" "$tfA" || true)
         rm -f "$tfA" "$tfB"
         
