@@ -171,6 +171,18 @@ draw_banner() {
   local sc; sc="$(screen_count)"
   cache_sys_info
 
+  local uptime_s; uptime_s="$(cat /proc/uptime 2>/dev/null | awk '{printf "%.0f", $1}' || echo 0)"
+  local uptime_display=""
+  if [ "$uptime_s" -ge 86400 ]; then
+    uptime_display="$(printf '%dd%dh' $((uptime_s/86400)) $((uptime_s%86400/3600)))"
+  elif [ "$uptime_s" -ge 3600 ]; then
+    uptime_display="$(printf '%dh%dm' $((uptime_s/3600)) $((uptime_s%3600/60)))"
+  else
+    uptime_display="$(printf '%dm' $((uptime_s/60)))"
+  fi
+
+  local load; load="$(awk '{printf "%.1f %.1f %.1f", $1, $2, $3}' /proc/loadavg 2>/dev/null || echo "- - -")"
+
   local logo
   logo="$(gum style --bold --foreground "$C" -- '  ╔═══════════════════════════════╗')
 $(gum style --bold --foreground "$C" -- '  ║     SERVER  MANAGEMENT       ║')
@@ -185,10 +197,13 @@ $(gum style --bold --foreground "$C" -- '  ╚═══════════�
   local screen_line=""
   [ "$sc" -gt 0 ] && screen_line="${nl}$(gum style --foreground "$Y" -- "⚡ $sc Session(s)")"
 
+  local stats_line
+  stats_line="$(gum style --foreground "$GR" -- "  Up: $uptime_display  │  Load: $load")"
+
   local footer
   footer="$(gum style --foreground "$GR" -- '  ↑↓ Navigate  │  Enter Select  │  ESC Back')"
 
-  local full="${logo}${nl}${nl}${info_bar}${nl}${badge_line}${screen_line}${nl}${nl}${footer}"
+  local full="${logo}${nl}${nl}${info_bar}${nl}${stats_line}${nl}${badge_line}${screen_line}${nl}${nl}${footer}"
   gum style --padding "1 2" -- "$full"
 }
 
@@ -245,15 +260,25 @@ run_script() {
   [ -f "$path" ] || { echo "Nicht gefunden: $path"; read -r -p " Enter..."; return 1; }
   chmod 755 "$path" 2>/dev/null || true
 
+  local start_s="$SECONDS"
   echo
   FORCE_REBUILD="$FORCE_REBUILD" USE_PGO="$USE_PGO" USE_LTO="$USE_LTO" bash "$path" "$@"
   local rc=$?
+  local duration=$((SECONDS - start_s))
+  local dur_str=""
+  if [ "$duration" -ge 3600 ]; then
+    dur_str="$(printf '%dh%dm%ds' $((duration/3600)) $((duration%3600/60)) $((duration%60)))"
+  elif [ "$duration" -ge 60 ]; then
+    dur_str="$(printf '%dm%ds' $((duration/60)) $((duration%60)))"
+  else
+    dur_str="${duration}s"
+  fi
   echo
   if [ "$rc" -eq 0 ]; then
-    _ok "✔ Fertig (OK)"
+    _ok "✔ Fertig (OK)  ${dur_str}"
     is_build_script "$script" && auto_repo_sync
   else
-    _fail "✘ Fertig (Exit: $rc)"
+    _fail "✘ Fertig (Exit: $rc)  ${dur_str}"
   fi
   read -r -p " Enter fuer Menue..." _
   return $rc

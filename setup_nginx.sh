@@ -29,7 +29,6 @@
 # ==============================================================================
 set -Eeuo pipefail
 
-# Cleanup on exit/error
 trap 'rm -f /tmp/nginx-build-$$* 2>/dev/null' EXIT INT TERM
 
 if [[ ! -f "setup_nginx.env" ]]; then
@@ -37,6 +36,9 @@ if [[ ! -f "setup_nginx.env" ]]; then
   exit 1
 fi
 source "setup_nginx.env"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
 
 NGINX_TARBALL_URL="https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
 OPENSSL_TARBALL_URL="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
@@ -283,12 +285,6 @@ THIRD_PARTY_MODULES=(
 # ------------------------------------------------------------------------------
 # Hilfsfunktionen
 # ------------------------------------------------------------------------------
-log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE" >&2; }
-die()  { log "FEHLER: $*"; exit 1; }
-
-require_root() {
-  [ "$EUID" -eq 0 ] || die "Bitte als root ausfuehren."
-}
 
 version_ge() {
   # usage: version_ge "1.30.0" "1.25.0"  => true
@@ -328,47 +324,6 @@ has_perl_dev_headers() {
 
   perl_core_h="$(find /usr/lib -path '*/perl/*/CORE/perl.h' -type f 2>/dev/null | head -1 || true)"
   [ -n "$perl_core_h" ]
-}
-
-update_local_repo_if_configured() {
-  local repo_script repo_env
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  repo_env="$(dirname "$0")/setup_local_repo.env"
-  local repo_env_example
-  repo_env_example="$(dirname "$0")/setup_local_repo.env.example"
-  local repo_dir=""
-
-  if [ ! -x "$repo_script" ]; then
-    return 0
-  fi
-  if [ ! -f "$repo_env" ] && [ -f "$repo_env_example" ]; then
-    cp -n "$repo_env_example" "$repo_env" 2>/dev/null || true
-    log "Lokales Repo-Env erstellt: $(basename "$repo_env") (aus .example)"
-  fi
-  if [ ! -f "$repo_env" ]; then
-    log "Lokales Repository-Update uebersprungen: $(basename "$repo_env") fehlt"
-    return 0
-  fi
-
-  repo_dir="$(
-    (
-      set +u
-      # shellcheck disable=SC1090
-      source "$repo_env" 2>/dev/null || true
-      printf '%s' "${REPO_DIR:-}"
-    )
-  )"
-  if [ -z "$repo_dir" ]; then
-    log "Lokales Repository-Update uebersprungen: REPO_DIR ist nicht gesetzt"
-    return 0
-  fi
-  if [ ! -d "$repo_dir" ]; then
-    log "Lokales Repository-Update uebersprungen: REPO_DIR existiert nicht ($repo_dir)"
-    return 0
-  fi
-
-  log "Aktualisiere lokales Repository..."
-  "$repo_script" update || true
 }
 
 usage() {
@@ -437,6 +392,9 @@ create_backup() {
 install_build_deps() {
   log "Installiere Build-Abhaengigkeiten"
 
+  ensure_ccache
+  setup_ccache_env
+
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential make m4 pkg-config \
@@ -458,14 +416,7 @@ install_build_deps() {
     ruby ruby-dev rubygems rpm \
     wget curl git
 
-  # Paketsignierung ist optional: dpkg-sig bevorzugen, debsigs als Fallback.
-  if apt-cache show dpkg-sig >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-sig || true
-  elif apt-cache show debsigs >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y debsigs || true
-  else
-    log "Kein Paketsignierungs-Tool in den Repos gefunden – Signierung wird bei Bedarf uebersprungen"
-  fi
+  install_signing_tool
 
   if ! command -v fpm >/dev/null 2>&1; then
     log "Installiere fpm"
@@ -617,6 +568,11 @@ build_configure_args() {
   CONF_ARGS="$CONF_ARGS --with-compat"
   CONF_ARGS="$CONF_ARGS --with-file-aio"
   CONF_ARGS="$CONF_ARGS --with-threads"
+
+  if command -v ccache >/dev/null 2>&1; then
+    export CC="ccache gcc"
+    log "  [+] ccache aktiviert"
+  fi
 
   CC_OPT="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wno-implicit-function-declaration"
   LD_OPT="-Wl,-z,relro -Wl,-z,now -pie"
@@ -953,67 +909,6 @@ ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
 MODPOSTRM
   chmod 755 "$mod_postrm"
-}
-
-# ------------------------------------------------------------------------------
-# SHA256-Checksummen fuer alle erzeugten .deb-Pakete
-# ------------------------------------------------------------------------------
-generate_checksums() {
-  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
-    log "Erstelle SHA256SUMS fuer Pakete..."
-    cd "$PACKAGE_DIR"
-    sha256sum ./*.deb > SHA256SUMS
-    log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
-    tee -a "$LOG_FILE" < SHA256SUMS
-  fi
-}
-
-# ------------------------------------------------------------------------------
-# .deb-Pakete mit dpkg-sig signieren (optional, benoetigt GPG-Schluessel)
-# ------------------------------------------------------------------------------
-sign_packages() {
-  local sign_tool=""
-  if command -v dpkg-sig >/dev/null 2>&1; then
-    sign_tool="dpkg-sig"
-  elif command -v debsigs >/dev/null 2>&1; then
-    sign_tool="debsigs"
-  else
-    log "Kein Paketsignierungs-Tool installiert – ueberspringe Paketsignierung"
-    return 0
-  fi
-
-  local gpg_key_id="${GPG_KEY_ID:-}"
-  if [ -z "$gpg_key_id" ]; then
-    gpg_key_id="$(gpg --list-secret-keys --with-colons 2>/dev/null | awk -F: '/^sec/{print $5}' | head -1)" || true
-  fi
-
-  if [ -z "$gpg_key_id" ]; then
-    log "Kein GPG-Schluessel gefunden – ueberspringe Paketsignierung"
-    return 0
-  fi
-
-  log "Signiere .deb-Pakete mit $sign_tool (GPG-Schluessel $gpg_key_id)..."
-  local sign_count=0
-  local sign_fail=0
-  for deb in "$PACKAGE_DIR"/*.deb; do
-    [ -f "$deb" ] || continue
-
-    if [ "$sign_tool" = "dpkg-sig" ]; then
-      if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
-        continue
-      fi
-      if dpkg-sig -k "$gpg_key_id" --sign builder "$deb" >/dev/null 2>&1; then
-        sign_count=$((sign_count + 1))
-      else
-        sign_fail=$((sign_fail + 1))
-      fi
-    elif debsigs --sign=origin --default-key="$gpg_key_id" "$deb" >/dev/null 2>&1; then
-      sign_count=$((sign_count + 1))
-    else
-      sign_fail=$((sign_fail + 1))
-    fi
-  done
-  log "$sign_count Pakete signiert, $sign_fail fehlgeschlagen"
 }
 
 # ------------------------------------------------------------------------------
@@ -1686,6 +1581,7 @@ uninstall_cmd() {
 # ------------------------------------------------------------------------------
 package_all() {
   log "=== Starte Nginx Paket-Build ==="
+  start_build_timer
   log "Module: ${#THIRD_PARTY_MODULES[@]} Third-Party-Module als separate .deb-Pakete"
   install_build_deps
   prepare_sources
@@ -1697,7 +1593,7 @@ package_all() {
   create_nginx_doc_package
   sign_packages
   update_local_repo_if_configured
-  log "=== Paket-Build abgeschlossen ==="
+  log_build_summary "Nginx"
   echo ""
 
   echo "Naechster Schritt: $0 install"
@@ -1853,38 +1749,6 @@ install_all() {
   echo ""
   echo "Module aktivieren (Beispiel fuer /etc/nginx/nginx.conf):"
   echo "  include /usr/share/nginx/modules-available/mod-http-brotli.conf;"
-}
-
-# ------------------------------------------------------------------------------
-# OS/Arch Pruefung
-# ------------------------------------------------------------------------------
-check_os_arch() {
-  local os_id
-  local os_version_id
-  local os_major_version
-  local arch
-
-  if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    os_id="${ID:-}"
-    os_version_id="${VERSION_ID:-}"
-  else
-    os_id="unknown"
-    os_version_id="unknown"
-  fi
-
-  os_major_version=$(echo "$os_version_id" | cut -d. -f1)
-  arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
-
-  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ]; then
-    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer)." >&2
-    exit 1
-  fi
-
-  if [ "$arch" != "arm64" ]; then
-    echo "WARNUNG: Dieses Skript ist fuer arm64 optimiert. Aktuelle Architektur: $arch" >&2
-    echo "         Fortsetzung auf eigene Gefahr." >&2
-  fi
 }
 
 # ------------------------------------------------------------------------------

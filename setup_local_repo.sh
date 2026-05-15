@@ -24,7 +24,6 @@
 # ==============================================================================
 set -Eeuo pipefail
 
-# Cleanup on exit/error
 trap 'rm -f /tmp/repo-batch-*$$* 2>/dev/null' EXIT INT TERM
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +35,8 @@ if [[ ! -f "$SCRIPT_DIR/setup_local_repo.env" ]]; then
   echo "FEHLER: setup_local_repo.env nicht gefunden." >&2; exit 1
 fi
 source "$SCRIPT_DIR/setup_local_repo.env"
+
+source "$SCRIPT_DIR/common.sh"
 
 GPG_KEY_ID="${GPG_KEY_ID:-}"
 GPG_KEY_NAME="${GPG_KEY_NAME:-Xerolux Build Repo}"
@@ -63,24 +64,12 @@ CHANGELOG_FILE="$REPO_DIR/.repo-changelog"
 # ------------------------------------------------------------------------------
 # Hilfsfunktionen
 # ------------------------------------------------------------------------------
-log()        { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
-die()        { log "FEHLER: $*"; exit 1; }
-require_root() { [ "$EUID" -eq 0 ] || die "Bitte als root ausfuehren."; }
 
 changelog() {
   local action="$1" details="${2:-}"
   local entry="$(date '+%F %T') | $action | $details"
   echo "$entry" >> "$CHANGELOG_FILE"
   log "CHANGELOG: $action | $details"
-}
-
-check_os_arch() {
-  local os_id="" os_version_id="" os_major_version
-  [ -f /etc/os-release ] && . /etc/os-release
-  os_id="${ID:-}"; os_version_id="${VERSION_ID:-}"
-  os_major_version=$(echo "$os_version_id" | cut -d. -f1)
-  [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ] && \
-    { echo "FEHLER: Nur Ubuntu 24.04+." >&2; exit 1; }
 }
 
 usage() {
@@ -193,16 +182,54 @@ export_key() {
 # ------------------------------------------------------------------------------
 # Index (fuer ein Verzeichnis)
 # ------------------------------------------------------------------------------
+
+cleanup_by_hash() {
+  local target_dir="$1"
+  local removed=0
+
+  declare -A current_hashes
+  local hash_files=""
+  local contents_file="Contents-${REPO_ARCH}"
+  hash_files="Packages Packages.gz ${contents_file} ${contents_file}.gz"
+  while IFS= read -r deb; do
+    hash_files+=" $(basename "$deb")"
+  done < <(cd "$target_dir" && find . -maxdepth 1 -name '*.deb' -type f 2>/dev/null)
+
+  for f in $hash_files; do
+    [ -f "$target_dir/$f" ] || continue
+    current_hashes["$(sha256sum "$target_dir/$f" | awk '{print $1}')"]=1
+  done
+
+  for hash_dir in MD5Sum SHA1 SHA256 SHA512; do
+    local bh_dir="$target_dir/by-hash/$hash_dir"
+    [ -d "$bh_dir" ] || continue
+    while IFS= read -r stale; do
+      [ -z "$stale" ] && continue
+      local h="$(basename "$stale")"
+      if [ "$hash_dir" = "SHA256" ] && [ -z "${current_hashes[$h]+x}" ]; then
+        rm -f "$stale"
+        removed=$((removed + 1))
+      fi
+    done < <(find "$bh_dir" -maxdepth 1 -type f 2>/dev/null)
+  done
+
+  [ "$removed" -gt 0 ] && log "by-hash cleanup: $removed veraltete Dateien entfernt"
+}
+
 build_index() {
   local suite="$1"
   local target_dir="$2"
   cd "$target_dir" || die "Kann nicht nach $target_dir"
 
   log "Index fuer $suite ($target_dir)..."
-  dpkg-scanpackages -m . /dev/null 2>/dev/null > Packages
+
+  if command -v apt-ftparchive >/dev/null 2>&1; then
+    apt-ftparchive packages . > Packages 2>/dev/null
+  else
+    dpkg-scanpackages -m . /dev/null 2>/dev/null > Packages
+  fi
   gzip -9kc Packages > Packages.gz
 
-  # Contents-$arch (apt-file Support)
   local contents_file="Contents-${REPO_ARCH}"
   : > "$contents_file"
   if find . -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
@@ -233,8 +260,6 @@ Description: Xerolux APT Repository ($suite)
 Acquire-By-Hash: yes
 RELEASEHEAD
 
-  # Hash-Bloecke + by-hash
-  local md5_block="" sha1_block="" sha256_block="" sha512_block=""
   local hash_files="Packages Packages.gz ${contents_file} ${contents_file}.gz"
   while IFS= read -r deb; do
     hash_files+=" $(basename "$deb")"
@@ -242,14 +267,17 @@ RELEASEHEAD
 
   mkdir -p by-hash/MD5Sum by-hash/SHA1 by-hash/SHA256 by-hash/SHA512
 
+  local md5_block="" sha1_block="" sha256_block="" sha512_block=""
+  local sha256sums_file="SHA256SUMS"
+
   for f in $hash_files; do
     [ -f "$f" ] || continue
     local size; size="$(stat -c '%s' "$f")"
-    local md5_h sha1_h sha256_h sha512_h
-    md5_h="$(md5sum "$f" | awk '{print $1}')"
-    sha1_h="$(sha1sum "$f" | awk '{print $1}')"
+    local sha256_h sha512_h
     sha256_h="$(sha256sum "$f" | awk '{print $1}')"
     sha512_h="$(sha512sum "$f" | awk '{print $1}')"
+    local md5_h; md5_h="$(md5sum "$f" | awk '{print $1}')"
+    local sha1_h; sha1_h="$(sha1sum "$f" | awk '{print $1}')"
 
     md5_block+=" ${md5_h} ${size} ${f}"$'\n'
     sha1_block+=" ${sha1_h} ${size} ${f}"$'\n'
@@ -278,8 +306,10 @@ RELEASEHEAD
   fi
 
   if find . -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
-    find . -maxdepth 1 -name '*.deb' -type f -exec sha256sum {} \; > SHA256SUMS
+    find . -maxdepth 1 -name '*.deb' -type f -exec sha256sum {} \; > "$sha256sums_file"
   fi
+
+  cleanup_by_hash "$target_dir"
 
   local cnt; cnt="$(grep -c '^Package:' Packages 2>/dev/null || echo 0)"
   log "$suite: $cnt Pakete indiziert (Acquire-By-Hash: yes, Contents: yes)"
@@ -845,7 +875,7 @@ install_repo() {
   acquire_lock
 
   apt-get update -qq --allow-releaseinfo-change 2>/dev/null || apt-get update -qq 2>/dev/null || true
-  DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-dev gnupg || die "apt-get install fehlgeschlagen"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y dpkg-dev gnupg apt-utils || die "apt-get install fehlgeschlagen"
 
   mkdir -p "$REPO_TESTING" "$REPO_STABLE"
 
