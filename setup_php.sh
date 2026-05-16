@@ -33,6 +33,9 @@ if [[ ! -f "setup_php.env" ]]; then
 fi
 source "setup_php.env"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
 PHP_TARBALL_URL="https://www.php.net/distributions/php-${PHP_VERSION}.tar.gz"
 PHP_PREFIX="/usr"
 PHP_SYSCONFDIR="/etc/php/${PHP_VER_SHORT}"
@@ -627,12 +630,6 @@ PECL_EXTENSIONS=(
   tidy
 )
 
-# ------------------------------------------------------------------------------
-# Hilfsfunktionen
-# ------------------------------------------------------------------------------
-log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE" >&2; }
-die()  { log "FEHLER: $*"; exit 1; }
-
 compute_build_jobs() {
   local n
   n="$(nproc 2>/dev/null || echo 4)"
@@ -651,10 +648,6 @@ compute_build_jobs() {
 }
 
 BUILD_JOBS=$(compute_build_jobs)
-
-require_root() {
-  [ "$EUID" -eq 0 ] || die "Bitte als root ausfuehren."
-}
 
 resolve_staged_php_tool() {
   local tool="$1"
@@ -747,6 +740,9 @@ create_backup() {
 # ------------------------------------------------------------------------------
 install_build_deps() {
   log "Installiere Build-Abhaengigkeiten"
+
+  ensure_ccache
+  setup_ccache_env
 
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -1077,6 +1073,13 @@ build_php() {
 
   CC_OPT="-O2 -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3"
   LD_OPT="-Wl,-z,relro -Wl,-z,now -pie"
+
+  if command -v ccache >/dev/null 2>&1; then
+    CC_OPT="$CC_OPT -fuse-ld=lld 2>/dev/null || true"
+    export CC="ccache gcc"
+    export CXX="ccache g++"
+    log "  [+] ccache aktiviert (CC=$CC)"
+  fi
 
   local PGO_ENABLED="${USE_PGO:-yes}"
   local LTO_ENABLED="${USE_LTO:-yes}"
@@ -1663,67 +1666,6 @@ EXTPOSTRM
 }
 
 # ------------------------------------------------------------------------------
-# SHA256-Checksummen fuer alle erzeugten .deb-Pakete
-# ------------------------------------------------------------------------------
-generate_checksums() {
-  if [ -d "$PACKAGE_DIR" ] && find "$PACKAGE_DIR" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
-    log "Erstelle SHA256SUMS fuer Pakete..."
-    cd "$PACKAGE_DIR"
-    sha256sum ./*.deb > SHA256SUMS
-    log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
-    tee -a "$LOG_FILE" < SHA256SUMS
-  fi
-}
-
-# ------------------------------------------------------------------------------
-# .deb-Pakete mit dpkg-sig signieren (optional, benoetigt GPG-Schluessel)
-# ------------------------------------------------------------------------------
-sign_packages() {
-  local sign_tool=""
-  if command -v dpkg-sig >/dev/null 2>&1; then
-    sign_tool="dpkg-sig"
-  elif command -v debsigs >/dev/null 2>&1; then
-    sign_tool="debsigs"
-  else
-    log "Kein Paketsignierungs-Tool installiert – ueberspringe Paketsignierung"
-    return 0
-  fi
-
-  local gpg_key_id="${GPG_KEY_ID:-}"
-  if [ -z "$gpg_key_id" ]; then
-    gpg_key_id="$(gpg --list-secret-keys --with-colons 2>/dev/null | awk -F: '/^sec/{print $5}' | head -1)" || true
-  fi
-
-  if [ -z "$gpg_key_id" ]; then
-    log "Kein GPG-Schluessel gefunden – ueberspringe Paketsignierung"
-    return 0
-  fi
-
-  log "Signiere .deb-Pakete mit $sign_tool (GPG-Schluessel $gpg_key_id)..."
-  local sign_count=0
-  local sign_fail=0
-  for deb in "$PACKAGE_DIR"/*.deb; do
-    [ -f "$deb" ] || continue
-
-    if [ "$sign_tool" = "dpkg-sig" ]; then
-      if dpkg-sig --verify "$deb" 2>/dev/null | grep -q "GOODSIG"; then
-        continue
-      fi
-      if dpkg-sig -k "$gpg_key_id" --sign builder "$deb" >/dev/null 2>&1; then
-        sign_count=$((sign_count + 1))
-      else
-        sign_fail=$((sign_fail + 1))
-      fi
-    elif debsigs --sign=origin --default-key="$gpg_key_id" "$deb" >/dev/null 2>&1; then
-      sign_count=$((sign_count + 1))
-    else
-      sign_fail=$((sign_fail + 1))
-    fi
-  done
-  log "$sign_count Pakete signiert, $sign_fail fehlgeschlagen"
-}
-
-# ------------------------------------------------------------------------------
 # .deb-Paket: php8.5-custom (CLI + Common)
 # ------------------------------------------------------------------------------
 create_core_package() {
@@ -2206,12 +2148,7 @@ create_all_packages() {
   echo "Gesamt: ${_total_debs} .deb-Pakete in $PACKAGE_DIR"
   echo ""
   log "Build abgeschlossen: ${_total_debs} Pakete erstellt"
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
+  update_local_repo_if_configured
 
   echo "Naechster Schritt: $0 install"
 }
@@ -2474,6 +2411,7 @@ uninstall_cmd() {
 # ------------------------------------------------------------------------------
 package_all() {
   log "=== Starte PHP ${PHP_VER_SHORT} Paket-Build ==="
+  start_build_timer
   log "PECL-Extensions: ${#PECL_EXTENSIONS[@]}"
   install_build_deps
   prepare_sources
@@ -2482,14 +2420,9 @@ package_all() {
   create_all_packages
   create_php_dev_package
   sign_packages
-  log "=== Paket-Build abgeschlossen ==="
+  log_build_summary "PHP ${PHP_VER_SHORT}"
   echo ""
-  local repo_script
-  repo_script="$(dirname "$0")/setup_local_repo.sh"
-  if [ -x "$repo_script" ]; then
-    log "Aktualisiere lokales Repository..."
-    "$repo_script" update || true
-  fi
+  update_local_repo_if_configured
 
   echo "Naechster Schritt: $0 install"
 }
@@ -2592,34 +2525,8 @@ install_all() {
   echo "  Log:            $LOG_FILE"
 }
 
-# ------------------------------------------------------------------------------
-# OS/Arch Pruefung
-# ------------------------------------------------------------------------------
-check_os_arch() {
-  local os_id os_version_id os_major_version arch
-
-  if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    os_id="${ID:-}"
-    os_version_id="${VERSION_ID:-}"
-  else
-    os_id="unknown"
-    os_version_id="unknown"
-  fi
-
-  os_major_version=$(echo "$os_version_id" | cut -d. -f1)
-  arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
-
-  if [ "$os_id" != "ubuntu" ] || [ -z "$os_major_version" ] || [ "$os_major_version" -lt 24 ]; then
-    echo "FEHLER: Dieses Skript unterstuetzt nur Ubuntu 24.04 (oder neuer)." >&2
-    exit 1
-  fi
-  if [ "$arch" != "arm64" ]; then
-    echo "WARNUNG: Skript ist fuer arm64 optimiert. Architektur: $arch – fahre fort." >&2
-  fi
-}
-
-cmd_pecl_only() {
+main() {
+  check_os_arch
   if [ $# -eq 0 ]; then
     die "pecl-only: Keine Extension angegeben. Usage: $0 pecl-only ext1 ext2 ..."
   fi
