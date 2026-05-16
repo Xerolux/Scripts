@@ -24,7 +24,9 @@
       "Bash(cp .claude/worktrees/kind-mclean-ce1487/setup_postfix.sh .)",
       "Bash(git commit -m 'Add OpenSSL 4.0.0 unified build to all components *)",
       "Bash(git commit -m 'Improve git_update\\(\\) in menu.sh for conflict-free updates *)",
-      "Bash(git commit -m 'Enhance check_all_updates\\(\\) to also update .env files *)"
+      "Bash(git commit -m 'Enhance check_all_updates\\(\\) to also update .env files *)",
+      "Bash(tail -100 /tmp/setup_postfix.log 2>/dev/null | grep -A5 -B5 \"OpenSSL\\\\|prepare_openssl\" | head -50)",
+      "Bash(awk '{print $1}')"
     ]
   }
 }

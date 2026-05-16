@@ -297,12 +297,13 @@ build_ccargs() {
   log "Ermittle CCARGS/AUXLIBS..."
 
   # --- TLS (OpenSSL) – PFLICHT -----------------------------------------------
-  local openssl_inc="$BUILD_ROOT/openssl-${OPENSSL_VERSION}/include"
-  local openssl_lib="$BUILD_ROOT/openssl-${OPENSSL_VERSION}"
-  if [ -f "$openssl_inc/openssl/ssl.h" ] && [ -d "$openssl_lib" ]; then
+  local openssl_install="$BUILD_ROOT/openssl-install-${OPENSSL_VERSION}"
+  local openssl_inc="$openssl_install/include"
+  local openssl_lib="$openssl_install/lib"
+  if [ -f "$openssl_inc/openssl/ssl.h" ] && [ -f "$openssl_lib/libssl.so" ]; then
     log "  [+] TLS/OpenSSL (custom build: $openssl_lib)"
     CCARGS="$CCARGS -DUSE_TLS -I${openssl_inc}"
-    AUXLIBS="$AUXLIBS -L${openssl_lib} -lssl -lcrypto"
+    AUXLIBS="$AUXLIBS -L${openssl_lib} -lssl -lcrypto -Wl,-rpath,${openssl_lib}"
   else
     die "Custom OpenSSL nicht gefunden – TLS ist Pflicht"
   fi
