@@ -1015,7 +1015,6 @@ build_php() {
   CONF_ARGS="$CONF_ARGS --with-jpeg"
   CONF_ARGS="$CONF_ARGS --with-webp"
   CONF_ARGS="$CONF_ARGS --with-xpm"
-  CONF_ARGS="$CONF_ARGS --enable-gd-jis-conv"
   CONF_ARGS="$CONF_ARGS --with-gettext"
   CONF_ARGS="$CONF_ARGS --with-gmp"
   CONF_ARGS="$CONF_ARGS --with-mhash"
@@ -1039,7 +1038,6 @@ build_php() {
   CONF_ARGS="$CONF_ARGS --enable-xml"
   CONF_ARGS="$CONF_ARGS --enable-xmlreader"
   CONF_ARGS="$CONF_ARGS --enable-xmlwriter"
-  CONF_ARGS="$CONF_ARGS --with-pear"
   CONF_ARGS="$CONF_ARGS --enable-fileinfo"
   CONF_ARGS="$CONF_ARGS --enable-filter"
   CONF_ARGS="$CONF_ARGS --enable-ftp"
@@ -1587,7 +1585,6 @@ fi
 
 ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-command -v apt-mark >/dev/null 2>&1 && apt-mark hold php${PHP_VER_SHORT}-custom || true
 POSTINST
   chmod 755 "$postinst"
 
@@ -1595,7 +1592,6 @@ POSTINST
 #!/bin/sh
 set -e
 update-alternatives --remove php /usr/bin/php${PHP_VER_SHORT} 2>/dev/null || true
-command -v apt-mark >/dev/null 2>&1 && apt-mark unhold php${PHP_VER_SHORT}-custom 2>/dev/null || true
 ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
 POSTRM
@@ -1908,7 +1904,7 @@ EOF
     sharedscripts
     postrotate
         [ -f /var/run/php${PHP_VER_SHORT}-fpm.pid ] && kill -USR1 \$(cat /var/run/php${PHP_VER_SHORT}-fpm.pid) || true
-    endspost
+    endscript
 }
 EOF
 
