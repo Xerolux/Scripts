@@ -3,7 +3,28 @@
     "allow": [
       "WebSearch",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git commit -m 'Add .env config files with OpenSSL 4.0.0 and latest versions *)",
+      "Bash(cp /root/Scripts/setup_nginx.env.example /root/Scripts/setup_nginx.env)",
+      "Bash(cp /root/Scripts/setup_php.env.example /root/Scripts/setup_php.env)",
+      "Bash(cp /root/Scripts/setup_dovecot.env.example /root/Scripts/setup_dovecot.env)",
+      "Bash(cp /root/Scripts/setup_postfix.env.example /root/Scripts/setup_postfix.env)",
+      "Read(//root/**)",
+      "Bash(cd \"C:\\\\Users\\\\basti\\\\Documents\\\\GitHub\\\\Scripts\" && echo \"=== Versions in Main Repo ===\" && grep -E \"VERSION|OPENSSL\" setup_nginx.env setup_php.env setup_dovecot.env setup_postfix.env setup_backup_restore.env setup_local_repo.env)",
+      "Bash(git commit -m 'Update all .env.example files with OpenSSL 4.0.0 and latest versions *)",
+      "Bash(git pull *)",
+      "Bash(git checkout *)",
+      "Bash(git merge --no-ff claude/kind-mclean-ce1487 -m 'Merge OpenSSL 4.0.0 unified build changes from feature branch *)",
+      "Bash(git merge *)",
+      "Bash(cp .claude/worktrees/kind-mclean-ce1487/common.sh .)",
+      "Bash(cp .claude/worktrees/kind-mclean-ce1487/setup_nginx.sh .)",
+      "Bash(cp .claude/worktrees/kind-mclean-ce1487/setup_php.sh .)",
+      "Bash(cp .claude/worktrees/kind-mclean-ce1487/setup_dovecot.sh .)",
+      "Bash(cp .claude/worktrees/kind-mclean-ce1487/setup_postfix.sh .)",
+      "Bash(git commit -m 'Add OpenSSL 4.0.0 unified build to all components *)",
+      "Bash(git commit -m 'Improve git_update\\(\\) in menu.sh for conflict-free updates *)",
+      "Bash(git commit -m 'Enhance check_all_updates\\(\\) to also update .env files *)"
     ]
   }
 }
