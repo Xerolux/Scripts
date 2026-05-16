@@ -652,9 +652,6 @@ fi
 
   ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-
-# apt-mark hold – verhindert ueberschreiben durch apt upgrade
-command -v apt-mark >/dev/null 2>&1 && apt-mark hold postfix-custom || true
 POSTINST
   chmod 755 "$postinst"
 
@@ -664,7 +661,6 @@ set -e
 
 command -v systemctl >/dev/null 2>&1 && systemctl stop postfix 2>/dev/null || true
 command -v systemctl >/dev/null 2>&1 && systemctl disable postfix 2>/dev/null || true
-command -v apt-mark >/dev/null 2>&1 && apt-mark unhold postfix-custom 2>/dev/null || true
 rm -f /etc/logrotate.d/postfix-custom
 ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
