@@ -1183,7 +1183,25 @@ menu_sysinfo() {
 
 check_all_updates() {
   clear; draw_header "Update-Check"; echo
-  _bold "Pruefe alle Updates..."; echo
+  _bold "Aktualisiere Scripts und Config..."; echo
+
+  # Update scripts from git
+  git_update "$@"
+
+  # Recreate .env files from .example (ensures latest versions)
+  _bold "Aktualisiere .env Dateien..."; echo
+  local env_count=0
+  for f in "$SCRIPT_DIR"/setup_*.env.example; do
+    [ -f "$f" ] || continue
+    local env_file="${f%.example}"
+    if cp "$f" "$env_file" 2>/dev/null; then
+      env_count=$((env_count + 1))
+    fi
+  done
+  [ "$env_count" -gt 0 ] && _ok "  ✔ $env_count .env Dateien aktualisiert" || _warn "  (keine .env Dateien gefunden)"
+  echo
+
+  _bold "Pruefe alle Upstream-Updates..."; echo
 
   draw_box "Nginx" "$G" "$(bash "$SCRIPT_DIR/setup_nginx.sh" check-updates 2>&1 || true)"
   echo
