@@ -552,14 +552,19 @@ build_configure_args() {
 
   log "Ermittle ./configure Argumente..."
 
-  CONF_ARGS="$CONF_ARGS --prefix=/etc/nginx"
+  CONF_ARGS="$CONF_ARGS --prefix=/usr/share/nginx"
   CONF_ARGS="$CONF_ARGS --sbin-path=/usr/sbin/nginx"
   CONF_ARGS="$CONF_ARGS --modules-path=/usr/lib/nginx/modules"
   CONF_ARGS="$CONF_ARGS --conf-path=/etc/nginx/nginx.conf"
-  CONF_ARGS="$CONF_ARGS --error-log-path=/var/log/nginx/error.log"
+  CONF_ARGS="$CONF_ARGS --error-log-path=stderr"
   CONF_ARGS="$CONF_ARGS --http-log-path=/var/log/nginx/access.log"
   CONF_ARGS="$CONF_ARGS --pid-path=/run/nginx.pid"
-  CONF_ARGS="$CONF_ARGS --lock-path=/var/run/nginx.lock"
+  CONF_ARGS="$CONF_ARGS --lock-path=/var/lock/nginx.lock"
+  CONF_ARGS="$CONF_ARGS --http-client-body-temp-path=/var/lib/nginx/body"
+  CONF_ARGS="$CONF_ARGS --http-fastcgi-temp-path=/var/lib/nginx/fastcgi"
+  CONF_ARGS="$CONF_ARGS --http-proxy-temp-path=/var/lib/nginx/proxy"
+  CONF_ARGS="$CONF_ARGS --http-scgi-temp-path=/var/lib/nginx/scgi"
+  CONF_ARGS="$CONF_ARGS --http-uwsgi-temp-path=/var/lib/nginx/uwsgi"
   CONF_ARGS="$CONF_ARGS --user=$NGINX_USER"
   CONF_ARGS="$CONF_ARGS --group=$NGINX_GROUP"
 
@@ -604,6 +609,7 @@ build_configure_args() {
   if pkg-config --exists libpcre2-8 2>/dev/null || [ -f /usr/include/pcre.h ]; then
     log "  [+] PCRE (Rewrite)"
     CONF_ARGS="$CONF_ARGS --with-pcre"
+    CONF_ARGS="$CONF_ARGS --with-pcre-jit"
   else
     log "  [-] PCRE nicht gefunden"
   fi
@@ -639,32 +645,37 @@ build_configure_args() {
   CONF_ARGS="$CONF_ARGS --with-http_gunzip_module"
 
   if pkg-config --exists libgd 2>/dev/null || [ -f /usr/include/gd.h ]; then
-    log "  [+] Image Filter (libgd)"
-    CONF_ARGS="$CONF_ARGS --with-http_image_filter_module"
+    log "  [+] Image Filter (libgd, dynamic)"
+    CONF_ARGS="$CONF_ARGS --with-http_image_filter_module=dynamic"
   else
     log "  [-] libgd nicht gefunden (Image Filter deaktiviert)"
   fi
 
-  if pkg-config --exists libmaxminddb 2>/dev/null || [ -f /usr/include/maxminddb.h ]; then
-    log "  [+] GeoIP (nginx built-in, legacy)"
+  if pkg-config --exists geoip 2>/dev/null || [ -f /usr/include/GeoIP.h ]; then
+    log "  [+] GeoIP HTTP (libgeoip legacy, dynamic)"
     CONF_ARGS="$CONF_ARGS --with-http_geoip_module=dynamic"
   else
-    log "  [-] libmaxminddb nicht gefunden (GeoIP deaktiviert)"
+    log "  [-] libgeoip-dev nicht gefunden (legacy GeoIP HTTP deaktiviert)"
   fi
 
   if pkg-config --exists libxslt 2>/dev/null || [ -f /usr/include/libxslt/xslt.h ]; then
-    log "  [+] XSLT"
-    CONF_ARGS="$CONF_ARGS --with-http_xslt_module"
+    log "  [+] XSLT (dynamic)"
+    CONF_ARGS="$CONF_ARGS --with-http_xslt_module=dynamic"
   else
     log "  [-] libxslt nicht gefunden (XSLT deaktiviert)"
   fi
 
-  log "  [+] Stream (TCP/UDP Proxy)"
-  CONF_ARGS="$CONF_ARGS --with-stream"
+  log "  [+] Stream (TCP/UDP Proxy, dynamic)"
+  CONF_ARGS="$CONF_ARGS --with-stream=dynamic"
   CONF_ARGS="$CONF_ARGS --with-stream_realip_module"
 
-  log "  [+] Mail Proxy"
-  CONF_ARGS="$CONF_ARGS --with-mail"
+  if pkg-config --exists geoip 2>/dev/null || [ -f /usr/include/GeoIP.h ]; then
+    log "  [+] Stream GeoIP (libgeoip legacy, dynamic)"
+    CONF_ARGS="$CONF_ARGS --with-stream_geoip_module=dynamic"
+  fi
+
+  log "  [+] Mail Proxy (dynamic)"
+  CONF_ARGS="$CONF_ARGS --with-mail=dynamic"
 
   if [ -f /usr/include/gperftools/malloc_extension.h ] || [ -f /usr/include/google/tcmalloc.h ]; then
     log "  [+] Google Perftools (tcmalloc)"
@@ -843,18 +854,29 @@ if ! id -u www-data >/dev/null 2>&1; then
 fi
 
 mkdir -p /var/log/nginx /var/cache/nginx
-chown www-data:www-data /var/log/nginx 2>/dev/null || true
+mkdir -p /var/lib/nginx/body /var/lib/nginx/fastcgi /var/lib/nginx/proxy \
+         /var/lib/nginx/scgi /var/lib/nginx/uwsgi
+chown www-data:www-data /var/log/nginx /var/lib/nginx 2>/dev/null || true
 
 mkdir -p /usr/share/nginx/modules-available
+mkdir -p /etc/nginx/modules-enabled
 
-# Copy default configs on fresh install
+# Symlinks fuer built-in dynamische Module (wie Debian nginx-Pakete)
+for conf in /usr/share/nginx/modules-available/mod-http-geoip.conf \
+            /usr/share/nginx/modules-available/mod-http-image-filter.conf \
+            /usr/share/nginx/modules-available/mod-http-perl.conf \
+            /usr/share/nginx/modules-available/mod-http-xslt-filter.conf \
+            /usr/share/nginx/modules-available/mod-mail.conf \
+            /usr/share/nginx/modules-available/mod-stream.conf \
+            /usr/share/nginx/modules-available/mod-stream-geoip.conf; do
+  [ -f "$conf" ] || continue
+  ln -sf "$conf" "/etc/nginx/modules-enabled/$(basename "$conf")" 2>/dev/null || true
+done
+
+# Default-Configs nur bei Erstinstallation
 if [ ! -f /etc/nginx/nginx.conf ]; then
   echo "INFO: Keine nginx.conf gefunden – installiere Default-Konfiguration"
   mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/snippets /etc/nginx/conf.d
-fi
-
-# Einzelne Default-Configs nur installieren wenn sie noch nicht existieren
-if [ ! -f /etc/nginx/nginx.conf ]; then
   cp -a /usr/share/nginx/custom-defaults/nginx.conf /etc/nginx/nginx.conf
 fi
 if [ ! -f /etc/nginx/sites-available/default ]; then
@@ -866,12 +888,11 @@ if [ ! -f /etc/nginx/snippets/fastcgi-php.conf ]; then
 fi
 if [ ! -d /var/www/html ]; then
   mkdir -p /var/www/html
-  echo "<!DOCTYPE html><html><head><title>Welcome</title></head><body><h1>nginx is running (custom build)</h1></body></html>" > /var/www/html/index.html
+  echo "<!DOCTYPE html><html><head><title>Welcome</title></head><body><h1>nginx is running (custom build)</h1></body></html>" > /var/www/html/index.nginx-debian.html
 fi
 
 ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-command -v apt-mark >/dev/null 2>&1 && apt-mark hold nginx-custom || true
 POSTINST
   chmod 755 "$postinst"
 
@@ -882,7 +903,10 @@ set -e
 command -v systemctl >/dev/null 2>&1 && systemctl stop nginx 2>/dev/null || true
 command -v systemctl >/dev/null 2>&1 && systemctl disable nginx 2>/dev/null || true
 
-command -v apt-mark >/dev/null 2>&1 && apt-mark unhold nginx-custom 2>/dev/null || true
+for conf in mod-http-geoip.conf mod-http-image-filter.conf mod-http-perl.conf \
+            mod-http-xslt-filter.conf mod-mail.conf mod-stream.conf mod-stream-geoip.conf; do
+  rm -f "/etc/nginx/modules-enabled/$conf"
+done
 rm -f /etc/logrotate.d/nginx-custom
 ldconfig
 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
@@ -930,6 +954,11 @@ create_core_package() {
 
   mkdir -p "${STAGE_NGINX}/var/log/nginx"
   mkdir -p "${STAGE_NGINX}/var/cache/nginx"
+  mkdir -p "${STAGE_NGINX}/var/lib/nginx/body"
+  mkdir -p "${STAGE_NGINX}/var/lib/nginx/fastcgi"
+  mkdir -p "${STAGE_NGINX}/var/lib/nginx/proxy"
+  mkdir -p "${STAGE_NGINX}/var/lib/nginx/scgi"
+  mkdir -p "${STAGE_NGINX}/var/lib/nginx/uwsgi"
   mkdir -p "${STAGE_NGINX}/usr/share/nginx/modules-available"
 
   mkdir -p "${STAGE_NGINX}/lib/systemd/system"
@@ -973,7 +1002,7 @@ NGXSRV
     sharedscripts
     postrotate
         [ -f /run/nginx.pid ] && kill -USR1 $(cat /run/nginx.pid) || true
-    endspost
+    endscript
 }
 NGXLR
   log "logrotate config erstellt"
@@ -999,6 +1028,30 @@ NGXLR
     remaining_so="$(find "$so_staging_dir" -name '*.so' -type f 2>/dev/null | wc -l)"
     log "Verbleibende .so im Core-Paket (built-in dynamic): $remaining_so"
   fi
+
+  # load_module Confs fuer built-in dynamische Module (analog Debian nginx-Pakete)
+  local mods_avail="${STAGE_NGINX}/usr/share/nginx/modules-available"
+  local so_dir="${STAGE_NGINX}/usr/lib/nginx/modules"
+  mkdir -p "$mods_avail"
+
+  _make_builtin_conf() {
+    local conf_name="$1" so_name="$2"
+    if find "$so_dir" "$BUILD_ROOT/nginx-${NGINX_VERSION}/objs" \
+         -name "$so_name" -type f 2>/dev/null | grep -q .; then
+      printf 'load_module modules/%s;\n' "$so_name" > "$mods_avail/$conf_name"
+      log "  [+] Builtin-Mod-Conf: $conf_name"
+    else
+      log "  [-] Builtin-Mod-Conf: $conf_name – .so nicht gebaut, ueberspringe"
+    fi
+  }
+
+  _make_builtin_conf "mod-http-geoip.conf"         "ngx_http_geoip_module.so"
+  _make_builtin_conf "mod-http-image-filter.conf"  "ngx_http_image_filter_module.so"
+  _make_builtin_conf "mod-http-perl.conf"          "ngx_http_perl_module.so"
+  _make_builtin_conf "mod-http-xslt-filter.conf"  "ngx_http_xslt_filter_module.so"
+  _make_builtin_conf "mod-mail.conf"               "ngx_mail_module.so"
+  _make_builtin_conf "mod-stream.conf"             "ngx_stream_module.so"
+  _make_builtin_conf "mod-stream-geoip.conf"       "ngx_stream_geoip_module.so"
 
   mkdir -p "${STAGE_NGINX}/usr/share/nginx/custom-defaults"
   mkdir -p "${STAGE_NGINX}/usr/share/nginx/custom-defaults/sites-available"
@@ -1068,6 +1121,12 @@ FASTCGI
 # Nginx runtime directories
 d /run/nginx 0710 www-data root -
 d /var/cache/nginx 0750 www-data root -
+d /var/lib/nginx 0750 www-data root -
+d /var/lib/nginx/body 0700 www-data root -
+d /var/lib/nginx/fastcgi 0700 www-data root -
+d /var/lib/nginx/proxy 0700 www-data root -
+d /var/lib/nginx/scgi 0700 www-data root -
+d /var/lib/nginx/uwsgi 0700 www-data root -
 EOF
   log "tmpfiles.d config erstellt"
 
@@ -1102,7 +1161,6 @@ EOF
     --conflicts    nginx-core \
     --conflicts    nginx-full \
     --conflicts    nginx-light \
-    --conflicts    nginx-common \
     --provides     nginx \
     --provides     nginx-common \
     --replaces     nginx \
@@ -1139,8 +1197,6 @@ create_module_packages() {
 
   local so_staging_dir="${STAGE_NGINX}/usr/lib/nginx/modules"
   [ -d "$so_staging_dir" ] || die "Module-Staging nicht gefunden: $so_staging_dir"
-
-  create_module_maintainer_scripts
 
   local pkg_count=0
   local pkg_fail=0
@@ -1222,6 +1278,29 @@ load_module modules/ndk_module.so;
 LUALOAD
     fi
 
+    # Per-Modul Maintainer-Scripts (Symlinks in modules-enabled verwalten)
+    local mod_postinst="/tmp/nginx-mod-postinst-${mod}.sh"
+    local mod_postrm="/tmp/nginx-mod-postrm-${mod}.sh"
+    cat > "$mod_postinst" <<MODPOSTINST
+#!/bin/sh
+set -e
+mkdir -p /etc/nginx/modules-enabled
+[ -f "/usr/share/nginx/modules-available/${loadconf}.conf" ] && \
+  ln -sf "/usr/share/nginx/modules-available/${loadconf}.conf" \
+         "/etc/nginx/modules-enabled/${loadconf}.conf" || true
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+MODPOSTINST
+    chmod 755 "$mod_postinst"
+    cat > "$mod_postrm" <<MODPOSTRM
+#!/bin/sh
+set -e
+rm -f "/etc/nginx/modules-enabled/${loadconf}.conf"
+ldconfig
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+MODPOSTRM
+    chmod 755 "$mod_postrm"
+
     # fpm .deb erstellen
     local fpm_deps=""
     local dep
@@ -1241,8 +1320,8 @@ LUALOAD
       --description  "\"$desc (nginx $NGINX_VERSION)\"" \
       ${fpm_deps} \
       --deb-no-default-config-files \
-      --after-install  "/tmp/nginx-mod-postinst.sh" \
-      --after-remove   "/tmp/nginx-mod-postrm.sh" \
+      --after-install  "$mod_postinst" \
+      --after-remove   "$mod_postrm" \
       --force \
       --package      "$deb_file" \
       --chdir        "$mod_stage" \
@@ -1259,6 +1338,7 @@ LUALOAD
     fi
 
     rm -rf "$mod_stage"
+    rm -f "$mod_postinst" "$mod_postrm"
   done
 
   log "Modul-Pakete erstellt: $pkg_count erfolgreich, $pkg_fail fehlgeschlagen"
