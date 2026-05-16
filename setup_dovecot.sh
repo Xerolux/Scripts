@@ -408,7 +408,6 @@ build_dovecot() {
   LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie" \
   ./configure \
     systemdsystemunitdir=/lib/systemd/system \
-    --enable-maintainer-mode \
     --prefix="$PREFIX" \
     --sysconfdir="$SYSCONFDIR" \
     --localstatedir="$LOCALSTATEDIR" \
@@ -654,9 +653,18 @@ if ! id -u dovenull >/dev/null 2>&1; then
   adduser --system --group --home /var/run/dovecot --no-create-home \
     --gecos "Dovecot Login User" --shell /usr/sbin/nologin dovenull 2>/dev/null || true
 fi
+if ! getent group vmail >/dev/null 2>&1; then
+  addgroup --system vmail 2>/dev/null || true
+fi
+if ! id -u vmail >/dev/null 2>&1; then
+  adduser --system --ingroup vmail --home /var/vmail --no-create-home \
+    --gecos "Virtual Mail User" --shell /usr/sbin/nologin vmail 2>/dev/null || true
+fi
 
-mkdir -p /var/run/dovecot /var/lib/dovecot
+mkdir -p /var/run/dovecot /var/lib/dovecot /var/vmail
 chown dovecot:dovecot /var/lib/dovecot 2>/dev/null || true
+chown vmail:vmail /var/vmail 2>/dev/null || true
+chmod 770 /var/vmail 2>/dev/null || true
 
 # Copy default configs on fresh install
 if [ ! -f /etc/dovecot/dovecot.conf ]; then
@@ -700,7 +708,7 @@ if [ ! -f /etc/logrotate.d/dovecot-custom ]; then
     create 640 dovecot adm
     postrotate
         command -v dovecot >/dev/null 2>&1 && dovecot log reopen 2>/dev/null || true
-    endspost
+    endscript
 }
 LR
 fi
@@ -709,7 +717,6 @@ ldconfig
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
-  command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom dovecot-pigeonhole-custom dovecot-custom-mysql dovecot-custom-pgsql dovecot-custom-sqlite dovecot-custom-ldap dovecot-custom-gssapi dovecot-custom-solr dovecot-custom-imapd dovecot-custom-pop3d dovecot-custom-lmtpd || true
 POSTINST
   chmod 755 "$postinst"
 
@@ -717,7 +724,6 @@ POSTINST
 #!/bin/sh
 set -e
 
-command -v apt-mark >/dev/null 2>&1 && apt-mark unhold dovecot-core-custom dovecot-pigeonhole-custom 2>/dev/null || true
 if command -v systemctl >/dev/null 2>&1; then
   systemctl stop dovecot 2>/dev/null || true
   systemctl disable dovecot 2>/dev/null || true
@@ -1632,14 +1638,23 @@ if ! id -u dovenull >/dev/null 2>&1; then
   adduser --system --group --home /var/run/dovecot --no-create-home \
     --gecos "Dovecot Login User" --shell /usr/sbin/nologin dovenull 2>/dev/null || true
 fi
+if ! getent group vmail >/dev/null 2>&1; then
+  addgroup --system vmail 2>/dev/null || true
+fi
+if ! id -u vmail >/dev/null 2>&1; then
+  adduser --system --ingroup vmail --home /var/vmail --no-create-home \
+    --gecos "Virtual Mail User" --shell /usr/sbin/nologin vmail 2>/dev/null || true
+fi
 
 # Generate DH parameters if missing
 if [ ! -f /etc/dovecot/dh.pem ] && command -v openssl >/dev/null 2>&1; then
   openssl dhparam -out /etc/dovecot/dh.pem 2048 2>/dev/null &
 fi
 
-mkdir -p /var/run/dovecot /var/lib/dovecot
+mkdir -p /var/run/dovecot /var/lib/dovecot /var/vmail
 chown dovecot:dovecot /var/lib/dovecot 2>/dev/null || true
+chown vmail:vmail /var/vmail 2>/dev/null || true
+chmod 770 /var/vmail 2>/dev/null || true
 
 # Copy default configs on fresh install
 if [ ! -f /etc/dovecot/dovecot.conf ]; then
@@ -1675,7 +1690,6 @@ ldconfig
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
-command -v apt-mark >/dev/null 2>&1 && apt-mark hold dovecot-core-custom || true
 POSTINST
   chmod 755 "$postinst"
 
@@ -1683,7 +1697,6 @@ POSTINST
 #!/bin/sh
 set -e
 
-command -v apt-mark >/dev/null 2>&1 && apt-mark unhold dovecot-core-custom 2>/dev/null || true
 if command -v systemctl >/dev/null 2>&1; then
   systemctl stop dovecot 2>/dev/null || true
   systemctl disable dovecot 2>/dev/null || true
