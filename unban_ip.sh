@@ -16,11 +16,14 @@ RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; BLUE=$'\033[0;34m'
 
 SILENT_MODE="${SILENT_MODE:-false}"
 
+LOCK_FILE="/var/run/unban-ip.lock"
+cleanup_lock() { rm -f "$LOCK_FILE" 2>/dev/null || true; }
+
 mkdir -p "$STATE_DIR" >/dev/null 2>&1 || true
 
 _TMPFILES=()
 cleanup_tmpfiles() { rm -f "${_TMPFILES[@]}" 2>/dev/null || true; }
-trap cleanup_tmpfiles EXIT
+trap 'cleanup_tmpfiles; cleanup_lock' EXIT
 
 log_output() {
   [[ "$SILENT_MODE" == "true" ]] && return 0
@@ -48,6 +51,18 @@ EOF
 require_root() { if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then echo -e "${RED}Root nötig.${NC}" >&2; exit 1; fi; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo -e "${RED}Fehlt: $1${NC}" >&2; exit 1; }; }
 state_file_for(){ echo "${STATE_DIR}/${1}.set"; }
+
+acquire_lock() {
+  if [[ -f "$LOCK_FILE" ]]; then
+    local pid; pid="$(cat "$LOCK_FILE" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      echo -e "${RED}Already running (PID $pid).${NC}" >&2
+      exit 1
+    fi
+    rm -f "$LOCK_FILE"
+  fi
+  echo "$$" > "$LOCK_FILE"
+}
 
 get_cs_allowlist_name() {
   local d="$1"
@@ -250,7 +265,7 @@ show_bans() {
     local raw n; raw="$(cscli decisions list -o raw 2>/dev/null || true)"
     n=0
     if [[ -n "$raw" ]]; then
-      local ips; ips="$(echo "$raw" | awk -F',' 'NR>1 {sub(/^Ip:/, "", $3); print $3}')"
+      local ips; ips="$(echo "$raw" | awk -F',' 'NR>1 { for(i=1;i<=NF;i++) if($i ~ /^Ip:/) { sub(/^Ip:/, "", $i); print $i; break } }')"
       if [[ -n "$ips" ]]; then
          while IFS= read -r line; do
            log_output "  - $line"
@@ -348,7 +363,9 @@ build_targets_for_domain() {
 # ---------------- Main ----------------
 main() {
   require_root
+  acquire_lock
   local MODE="auto" DOMAIN="$DOMAIN_DEFAULT" UNBAN_ARG="" V6_PLEN="$IPV6_PREFIX_LENGTH_DEFAULT" TEST_MODE="false"
+  local -a targets=()
 
   while (("$#")); do
     case "$1" in
@@ -411,6 +428,7 @@ main() {
       fi
 
       local sf; sf="$(state_file_for "$DOMAIN")"
+      local -a prev=()
       mapfile -t prev < <(load_prev_set "$sf" || true)
 
       apply_targets "$TEST_MODE" "$CS_LIST_NAME" "${targets[@]}"
@@ -424,7 +442,6 @@ main() {
         
         mapfile -t old_only < <(grep -Fvx -f "$tfB" "$tfA" || true)
         rm -f "$tfA" "$tfB"
-        
         if [[ "${#old_only[@]}" -gt 0 ]]; then
           log_output -e "${YELLOW}Entferne veraltete Targets: ${old_only[*]}${NC}"
           cleanup_old_targets "$TEST_MODE" "$CS_LIST_NAME" "${old_only[@]}"

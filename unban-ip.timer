@@ -1,13 +1,13 @@
 [Unit]
 Description=Unban IP Service Timer - Run every 30 minutes
 Documentation=man:unban_ip(8)
-Requires=unban-ip.service
+Wants=unban-ip.service
 
 [Timer]
 OnBootSec=2min
 OnUnitActiveSec=30min
 Persistent=true
-AccuracySec=1s
+AccuracySec=1min
 
 [Install]
 WantedBy=timers.target
