@@ -1197,11 +1197,36 @@ check_all_updates() {
 git_update() {
   [ -d "$SCRIPT_DIR/.git" ] || return
   command -v git >/dev/null 2>&1 || return
-  local output
-  output="$(git -C "$SCRIPT_DIR" pull 2>&1)" || { _fail "git pull fehlgeschlagen"; return; }
-  echo "$output" | grep -qi "already up.to.date\|current" && return
+
+  local output current_branch
+  current_branch="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
+
+  # Fetch latest updates from remote
+  git -C "$SCRIPT_DIR" fetch origin >/dev/null 2>&1 || return
+
+  # Check if local changes exist (stash if needed)
+  local has_local_changes=0
+  if ! git -C "$SCRIPT_DIR" diff-index --quiet HEAD -- 2>/dev/null; then
+    has_local_changes=1
+    git -C "$SCRIPT_DIR" stash >/dev/null 2>&1
+  fi
+
+  # Hard reset to origin/main to avoid merge conflicts
+  output="$(git -C "$SCRIPT_DIR" reset --hard origin/"$current_branch" 2>&1)" || {
+    _fail "git reset fehlgeschlagen: $output"
+    return
+  }
+
+  echo "$output" | grep -qi "already up.to.date\|current\|HEAD is now" && {
+    [ "$has_local_changes" = "1" ] && git -C "$SCRIPT_DIR" stash pop >/dev/null 2>&1
+    return
+  }
+
   local nl=$'\n'
-  draw_box "Scripts aktualisiert" "$Y" "$output" "${nl}Neustart in 2s..."
+  local msg="Scripts aktualisiert${nl}${output}${nl}${nl}Neustart in 2s..."
+  [ "$has_local_changes" = "1" ] && msg="${msg}${nl}(lokale Änderungen wurden stashed)"
+
+  draw_box "Scripts aktualisiert" "$Y" "$msg"
   sleep 2
   exec bash "$0" "$@"
 }
