@@ -28,6 +28,9 @@ source "setup_dovecot.env"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
+# Prepare OpenSSL from source (for consistency with other components)
+prepare_openssl
+
 # Offizielle Tarballs (stabiler als Git-Clone, enthalten fertige configure-Skripte)
 DOVECOT_TARBALL="https://dovecot.org/releases/2.4/dovecot-${DOVECOT_VERSION}.tar.gz"
 PIGEONHOLE_TARBALL="https://pigeonhole.dovecot.org/releases/2.4/dovecot-pigeonhole-${PIGEONHOLE_VERSION}.tar.gz"
@@ -404,8 +407,8 @@ build_dovecot() {
     export CC="ccache gcc"
     log "  [+] ccache aktiviert"
   fi
-  CFLAGS="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3 -O2" \
-  LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie" \
+  CFLAGS="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3 -O2 -I$BUILD_ROOT/openssl-${OPENSSL_VERSION}/include" \
+  LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie -L$BUILD_ROOT/openssl-${OPENSSL_VERSION}" \
   ./configure \
     systemdsystemunitdir=/lib/systemd/system \
     --enable-maintainer-mode \

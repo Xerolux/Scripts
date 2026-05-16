@@ -33,6 +33,9 @@ source "setup_postfix.env"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
+# Prepare OpenSSL from source (for consistency with other components)
+prepare_openssl
+
 # ftp.porcupine.org ist ein FTP-Server und unterstützt kein HTTPS → http://
 POSTFIX_TARBALL_URLS=(
   "https://ftp.gwdg.de/pub/misc/postfix/official/postfix-${POSTFIX_VERSION}.tar.gz"
@@ -203,7 +206,6 @@ install_build_deps() {
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential make m4 pkg-config \
-    libssl-dev \
     libsasl2-dev \
     libmariadb-dev \
     libldap2-dev \
@@ -295,12 +297,14 @@ build_ccargs() {
   log "Ermittle CCARGS/AUXLIBS..."
 
   # --- TLS (OpenSSL) – PFLICHT -----------------------------------------------
-  if pkg-config --exists openssl 2>/dev/null || [ -f /usr/include/openssl/ssl.h ]; then
-    log "  [+] TLS/OpenSSL"
-    CCARGS="$CCARGS -DUSE_TLS"
-    AUXLIBS="$AUXLIBS -lssl -lcrypto"
+  local openssl_inc="$BUILD_ROOT/openssl-${OPENSSL_VERSION}/include"
+  local openssl_lib="$BUILD_ROOT/openssl-${OPENSSL_VERSION}"
+  if [ -f "$openssl_inc/openssl/ssl.h" ] && [ -d "$openssl_lib" ]; then
+    log "  [+] TLS/OpenSSL (custom build: $openssl_lib)"
+    CCARGS="$CCARGS -DUSE_TLS -I${openssl_inc}"
+    AUXLIBS="$AUXLIBS -L${openssl_lib} -lssl -lcrypto"
   else
-    die "OpenSSL-Dev nicht gefunden – TLS ist Pflicht"
+    die "Custom OpenSSL nicht gefunden – TLS ist Pflicht"
   fi
 
   # --- Cyrus SASL – für SMTP-Auth (ISPConfig nutzt Dovecot SASL Socket) ------

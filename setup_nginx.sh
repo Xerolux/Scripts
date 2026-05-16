@@ -455,28 +455,7 @@ prepare_sources() {
 # ------------------------------------------------------------------------------
 # Quellen: OpenSSL
 # ------------------------------------------------------------------------------
-prepare_openssl() {
-  local ssl_dir="$BUILD_ROOT/openssl-${OPENSSL_VERSION}"
-  local ssl_tar="$BUILD_ROOT/openssl-${OPENSSL_VERSION}.tar.gz"
-
-  if [ -d "$ssl_dir" ] && [ -f "$ssl_dir/Configure" ]; then
-    log "OpenSSL $OPENSSL_VERSION Quellen bereits vorhanden: $ssl_dir"
-    return 0
-  fi
-
-  if [ ! -f "$ssl_tar" ]; then
-    log "Lade OpenSSL $OPENSSL_VERSION Tarball"
-    curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --progress-bar \
-      "$OPENSSL_TARBALL_URL" -o "$ssl_tar" \
-      || die "OpenSSL Download fehlgeschlagen"
-  else
-    log "OpenSSL Tarball bereits vorhanden: $ssl_tar"
-  fi
-
-  tar xzf "$ssl_tar" -C "$BUILD_ROOT"
-  [ -d "$ssl_dir" ] || die "Tarball entpackt kein Verzeichnis openssl-${OPENSSL_VERSION}"
-  log "OpenSSL Quellen: $ssl_dir"
-}
+# prepare_openssl() is now provided by common.sh
 
 # ------------------------------------------------------------------------------
 # Quellen: Third-Party-Module via git clone
