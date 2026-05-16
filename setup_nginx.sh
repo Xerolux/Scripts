@@ -41,7 +41,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 NGINX_TARBALL_URL="https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-OPENSSL_TARBALL_URL="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
+# OpenSSL 4.x wird von GitHub ausgeliefert, 3.x von openssl.org
+if [[ "${OPENSSL_VERSION%%.*}" -ge 4 ]]; then
+  OPENSSL_TARBALL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+else
+  OPENSSL_TARBALL_URL="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
+fi
 
 # ------------------------------------------------------------------------------
 # Third-Party-Module – als assoziative Arrays
