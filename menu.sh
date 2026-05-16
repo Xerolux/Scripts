@@ -1181,6 +1181,36 @@ menu_sysinfo() {
   read -r -p " Enter fuer Menue..." _
 }
 
+compare_versions() {
+  local current="$1" available="$2"
+  # Simple version comparison: split by dots and compare numerically
+  local IFS=. current_arr=($current) available_arr=($available)
+  for ((i=0; i<${#available_arr[@]}; i++)); do
+    local c=${current_arr[$i]:-0} a=${available_arr[$i]:-0}
+    [ "$a" -gt "$c" ] && return 0  # Update available
+    [ "$a" -lt "$c" ] && return 1  # Downgrade - no update
+  done
+  return 1  # Same version
+}
+
+auto_update_component() {
+  local script="$1" env_var="$2" current="$3" available="$4"
+
+  # Avoid downgrades
+  if ! compare_versions "$current" "$available"; then
+    [ "$available" != "$current" ] && _warn "  [SKIP] $script: $current → $available (Downgrade)" || true
+    return 1
+  fi
+
+  # Update .env file
+  local env_file="$SCRIPT_DIR/${script%.sh}.env"
+  if sed -i "s/^${env_var}=.*/\${env_var}=\"${available}\"/" "$env_file" 2>/dev/null; then
+    _ok "  [UPDATE] $script: $current → $available"
+    return 0
+  fi
+  return 1
+}
+
 check_all_updates() {
   clear; draw_header "Update-Check"; echo
   _bold "Aktualisiere Scripts und Config..."; echo
@@ -1201,15 +1231,43 @@ check_all_updates() {
   [ "$env_count" -gt 0 ] && _ok "  ✔ $env_count .env Dateien aktualisiert" || _warn "  (keine .env Dateien gefunden)"
   echo
 
-  _bold "Pruefe alle Upstream-Updates..."; echo
+  _bold "Pruefe und installiere Updates..."; echo
 
-  draw_box "Nginx" "$G" "$(bash "$SCRIPT_DIR/setup_nginx.sh" check-updates 2>&1 || true)"
+  # Check and auto-update each component
+  local updates_found=0
+
+  # Nginx
+  local nginx_out="$(bash "$SCRIPT_DIR/setup_nginx.sh" check-updates 2>&1 || true)"
+  local nginx_current="$(echo "$nginx_out" | grep "^│ Nginx" | awk '{print $4}')"
+  local nginx_available="$(echo "$nginx_out" | grep "^│ Nginx" | awk '{print $6}')"
+  if [ -n "$nginx_current" ] && [ -n "$nginx_available" ] && [ "$nginx_current" != "$nginx_available" ]; then
+    auto_update_component "setup_nginx.sh" "NGINX_VERSION" "$nginx_current" "$nginx_available" && updates_found=$((updates_found + 1))
+  fi
+
+  # Dovecot
+  local dovecot_out="$(bash "$SCRIPT_DIR/setup_dovecot.sh" check-updates 2>&1 || true)"
+  local dovecot_current="$(echo "$dovecot_out" | grep "^│ *Dovecot" | head -1 | awk '{print $4}')"
+  local dovecot_available="$(echo "$dovecot_out" | grep "^│ *Dovecot" | head -1 | awk '{print $6}')"
+  if [ -n "$dovecot_current" ] && [ -n "$dovecot_available" ] && [ "$dovecot_current" != "$dovecot_available" ]; then
+    auto_update_component "setup_dovecot.sh" "DOVECOT_VERSION" "$dovecot_current" "$dovecot_available" && updates_found=$((updates_found + 1))
+  fi
+
+  # Postfix (skip downgrades like 3.11.1 -> 3.1.1)
+  local postfix_out="$(bash "$SCRIPT_DIR/setup_postfix.sh" check-updates 2>&1 || true)"
+  local postfix_current="$(echo "$postfix_out" | grep "^│ Postfix" | awk '{print $4}')"
+  local postfix_available="$(echo "$postfix_out" | grep "^│ Postfix" | awk '{print $6}')"
+  if [ -n "$postfix_current" ] && [ -n "$postfix_available" ] && [ "$postfix_current" != "$postfix_available" ]; then
+    auto_update_component "setup_postfix.sh" "POSTFIX_VERSION" "$postfix_current" "$postfix_available" && updates_found=$((updates_found + 1))
+  fi
+
   echo
-  draw_box "Dovecot" "$Y" "$(bash "$SCRIPT_DIR/setup_dovecot.sh" check-updates 2>&1 || true)"
-  echo
-  draw_box "Postfix" "$B" "$(bash "$SCRIPT_DIR/setup_postfix.sh" check-updates 2>&1 || true)"
-  echo
-  _ok "✔ Fertig."; read -r -p " Enter fuer Menue..." _
+  if [ "$updates_found" -gt 0 ]; then
+    _ok "✔ $updates_found Komponente(n) aktualisiert - bereit zum Bauen!"
+  else
+    _ok "✔ Alles aktuell"
+  fi
+
+  read -r -p " Enter fuer Menue..." _
 }
 
 git_update() {
