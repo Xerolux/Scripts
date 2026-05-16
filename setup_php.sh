@@ -36,6 +36,9 @@ source "setup_php.env"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
+# Prepare OpenSSL from source (for consistency with other components)
+prepare_openssl
+
 PHP_TARBALL_URL="https://www.php.net/distributions/php-${PHP_VERSION}.tar.gz"
 PHP_PREFIX="/usr"
 PHP_SYSCONFDIR="/etc/php/${PHP_VER_SHORT}"
@@ -747,7 +750,6 @@ install_build_deps() {
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential make m4 pkg-config autoconf automake libtool bison re2c cmake \
-    libssl-dev \
     libpcre2-dev \
     zlib1g-dev \
     libbz2-dev \
@@ -1005,7 +1007,8 @@ build_php() {
   CONF_ARGS="$CONF_ARGS --enable-bcmath"
   CONF_ARGS="$CONF_ARGS --with-curl"
   CONF_ARGS="$CONF_ARGS --with-openssl"
-  CONF_ARGS="$CONF_ARGS --with-openssl-dir=/usr"
+  CONF_ARGS="$CONF_ARGS --with-openssl-dir=$BUILD_ROOT/openssl-${OPENSSL_VERSION}"
+  CONF_ARGS="$CONF_ARGS --with-openssl-opt=no-tests"
   CONF_ARGS="$CONF_ARGS --with-zlib"
   CONF_ARGS="$CONF_ARGS --with-zlib-dir=/usr"
   CONF_ARGS="$CONF_ARGS --with-bz2"
