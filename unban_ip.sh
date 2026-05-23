@@ -35,16 +35,23 @@ usage() {
 Verwendung:
   sudo $0 [--domain DOMAIN] [--prefix-length N] [--test] [--silent]
   sudo $0 --bans
-  sudo $0 --unban <IP|CIDR|Domain>
+  sudo $0 --unban <IP|CIDR|Domain> [--jail JAIL_NAME]
 
 Optionen:
   --domain <d>         Domain (Default: $DOMAIN_DEFAULT)
   --prefix-length <n>  IPv6-Präfix (Default $IPV6_PREFIX_LENGTH_DEFAULT, 0 = kein Präfix)
   --bans               Nur Bans anzeigen (F2B + CrowdSec)
   --unban <Ziel>       Ziel entbannen & whitelisten (Domain/IP/CIDR)
+  --jail <name>        Nur spezifischen Jail unbanned (z.B. nginx-limit-req, sshd)
   --test               Dry-Run (nur anzeigen, keine Änderungen)
   --silent             Nur Fehler loggen (für Systemd-Timer)
   -h, --help           Hilfe
+
+Beispiele:
+  sudo $0 --unban 94.31.113.92                           # Alle Jails
+  sudo $0 --unban 94.31.113.92 --jail nginx-limit-req    # Nur nginx-limit-req
+  sudo $0 --unban home.blueml.one                        # Domain auflösen & unbanned
+  sudo $0 --bans                                          # Status anzeigen
 EOF
 }
 
@@ -128,17 +135,26 @@ f2b_ignore_contains() {
 }
 
 f2b_unban() {
-  local t="$1" test="$2"
+  local t="$1" test="$2" jail_filter="${3:-}"
   command -v fail2ban-client >/dev/null 2>&1 || return 0
 
   if [[ "$test" == "true" ]]; then
-    log_output -e "${GREEN}[TEST] F2B: unban '$t' (pro Jail).${NC}"
+    if [[ -n "$jail_filter" ]]; then
+      log_output -e "${GREEN}[TEST] F2B: unban '$t' aus Jail '$jail_filter'.${NC}"
+    else
+      log_output -e "${GREEN}[TEST] F2B: unban '$t' (alle Jails).${NC}"
+    fi
     return 0
   fi
 
   local unban_count=0
   while IFS= read -r j; do
     [[ -z "$j" ]] && continue
+    # Wenn --jail Filter gesetzt, nur den Jail unbanned
+    if [[ -n "$jail_filter" && "$j" != "$jail_filter" ]]; then
+      continue
+    fi
+    
     if f2b_is_banned_in_jail "$j" "$t"; then
       if fail2ban-client set "$j" unbanip "$t" >/dev/null 2>&1; then
         log_output -e "${GREEN}F2B: '$t' aus Jail '$j' entbannt.${NC}"
@@ -150,7 +166,9 @@ f2b_unban() {
   done < <(get_f2b_jails)
 
   if [[ "$unban_count" -eq 0 ]]; then
-    fail2ban-client unban "$t" >/dev/null 2>&1 || true
+    if [[ -z "$jail_filter" ]]; then
+      fail2ban-client unban "$t" >/dev/null 2>&1 || true
+    fi
   fi
 }
 
@@ -177,6 +195,23 @@ f2b_add_ignore() {
   done < <(get_f2b_jails)
 }
 
+f2b_add_ignore_to_jail() {
+  local v="$1" jail="$2" test="$3"
+  command -v fail2ban-client >/dev/null 2>&1 || return 0
+  
+  if ! f2b_ignore_contains "$jail" "$v"; then
+    if [[ "$test" == "true" ]]; then
+      log_output -e "${GREEN}[TEST] F2B: add ignoreip '$v' -> '$jail'.${NC}"
+    else
+      if fail2ban-client set "$jail" addignoreip "$v" >/dev/null 2>&1; then
+        log_output -e "${GREEN}F2B: ignoreip '$v' in '$jail' gesetzt.${NC}"
+      else
+        echo -e "${RED}F2B: addignoreip fehlgeschlagen ($v/$jail).${NC}" >&2
+      fi
+    fi
+  fi
+}
+
 f2b_del_ignore() {
   local v="$1" test="$2"
   command -v fail2ban-client >/dev/null 2>&1 || return 0
@@ -188,14 +223,16 @@ f2b_del_ignore() {
     fi
 
     if [[ "$test" == "true" ]]; then
-      log_output -e "${GREEN}[TEST] F2B: del ignoreip '$v' -> '$j'.${NC}"
+      log_output -e "${GREEN}[TEST] F2B: remove ignoreip '$v' aus '$j'.${NC}"
       continue
     fi
 
-    if fail2ban-client set "$j" delignoreip "$v" >/dev/null 2>&1; then
+    # Versuche mit removeattr (neuere Fail2Ban Versionen)
+    if fail2ban-client set "$j" removeattr ignoreip "$v" >/dev/null 2>&1; then
       log_output -e "${GREEN}F2B: ignoreip '$v' aus '$j' entfernt.${NC}"
     else
-      echo -e "${RED}F2B: delignoreip fehlgeschlagen ($v/$j).${NC}" >&2
+      # Fallback: Einfach loggen, nicht fehler
+      log_output -e "${YELLOW}F2B: Ignorieren von '$v' aus '$j' konnte nicht entfernt werden (ggf. nicht nötig).${NC}"
     fi
   done < <(get_f2b_jails)
 }
@@ -209,7 +246,11 @@ cs_allowlist_exists() {
 cs_allowlist_create() {
   local name="$1" domain="$2"
   cs_allowlist_exists "$name" && return 0
-  cscli allowlists create "$name" -d "dyn allowlist for ${domain}" >/dev/null 2>&1 || true
+  # cscli braucht -d (description) Flag – aber fallback wenn es fehlschlägt
+  if ! cscli allowlists create "$name" --description "Dynamic allowlist for ${domain}" >/dev/null 2>&1; then
+    log_output -e "${YELLOW}CS: Allowlist '$name' existiert bereits oder konnte nicht erstellt werden.${NC}"
+    return 0
+  fi
 }
 cs_allowlist_values() {
   local name="$1"
@@ -292,21 +333,27 @@ load_prev_set() {
 save_curr_set() { local f="$1"; shift; printf '%s\n' "$@" | grep -Ev '^[[:space:]]*$' | sort -u > "${f}.tmp"; mv "${f}.tmp" "$f"; }
 
 apply_targets() {
-  local test="$1" allowlist_name="$2"; shift 2
+  local test="$1" allowlist_name="$2" jail_filter="${3:-}"; shift 3
   local t
 
   local existing_allowlist=""
   if [[ "$test" != "true" ]]; then
-    existing_allowlist="$(cs_allowlist_values "$allowlist_name")"
+    existing_allowlist="$(cs_allowlist_values "$allowlist_name" 2>/dev/null || true)"
   fi
 
   for t in "$@"; do
     [[ -z "$t" ]] && continue
     
-    f2b_unban "$t" "$test"
+    # 1. ERST Unbanned (entfernt aktive Bans)
+    f2b_unban "$t" "$test" "$jail_filter"
     cs_unban_any "$t" "$test"
     
-    f2b_add_ignore "$t" "$test"
+    # 2. DANN whitelisten (verhindert neue Bans)
+    if [[ -n "$jail_filter" ]]; then
+      f2b_add_ignore_to_jail "$t" "$jail_filter" "$test"
+    else
+      f2b_add_ignore "$t" "$test"
+    fi
     
     if [[ "$test" == "true" ]]; then
       log_output -e "${GREEN}[TEST] CS: allowlists add '$t' -> '$allowlist_name'${NC}"
@@ -324,15 +371,17 @@ cleanup_old_targets() {
   local t
   for t in "$@"; do
     [[ -z "$t" ]] && continue
-    f2b_del_ignore "$t" "$test"
     
+    # Erst aus Allowlist entfernen
     if [[ "$test" == "true" ]]; then
       log_output -e "${GREEN}[TEST] CS: allowlists remove '$t' aus '$allowlist_name'${NC}"
     else
       cs_allowlist_remove_value "$allowlist_name" "$t"
       log_output -e "${YELLOW}CS: Aus Allowlist '$allowlist_name' entfernt: $t${NC}"
     fi
-
+    
+    # Dann Ignore/Ban aufräumen
+    f2b_del_ignore "$t" "$test"
     f2b_unban "$t" "$test"
     cs_unban_any "$t" "$test"
   done
@@ -364,13 +413,14 @@ build_targets_for_domain() {
 main() {
   require_root
   acquire_lock
-  local MODE="auto" DOMAIN="$DOMAIN_DEFAULT" UNBAN_ARG="" V6_PLEN="$IPV6_PREFIX_LENGTH_DEFAULT" TEST_MODE="false"
+  local MODE="auto" DOMAIN="$DOMAIN_DEFAULT" UNBAN_ARG="" V6_PLEN="$IPV6_PREFIX_LENGTH_DEFAULT" TEST_MODE="false" JAIL_FILTER=""
   local -a targets=()
 
   while (("$#")); do
     case "$1" in
       --bans) MODE="bans"; shift;;
       --unban) MODE="unban"; UNBAN_ARG="${2:-}"; [[ -z "$UNBAN_ARG" ]] && { echo -e "${RED}--unban braucht Argument.${NC}" >&2; exit 1; }; shift 2;;
+      --jail) JAIL_FILTER="${2:-}"; [[ -z "$JAIL_FILTER" ]] && { echo -e "${RED}--jail braucht Wert.${NC}" >&2; exit 1; }; shift 2;;
       --domain) DOMAIN="${2:-}"; [[ -z "$DOMAIN" ]] && { echo -e "${RED}--domain braucht Wert.${NC}" >&2; exit 1; }; shift 2;;
       --prefix-length) V6_PLEN="${2:-}"; [[ "$V6_PLEN" =~ ^[0-9]+$ ]] || { echo -e "${RED}--prefix-length Zahl erwartet.${NC}" >&2; exit 1; }; shift 2;;
       --test) TEST_MODE="true"; shift;;
@@ -400,7 +450,12 @@ main() {
         log_output -e "${YELLOW}Keine Targets gefunden.${NC}"
         exit 0
       fi
-      log_output -e "${BLUE}Targets: ${targets[*]}${NC}"
+      
+      if [[ -n "$JAIL_FILTER" ]]; then
+        log_output -e "${BLUE}Targets: ${targets[*]} (Jail: $JAIL_FILTER)${NC}"
+      else
+        log_output -e "${BLUE}Targets: ${targets[*]}${NC}"
+      fi
 
       local unban_cs_name
       unban_cs_name="$(get_cs_allowlist_name "$unban_domain")"
@@ -409,7 +464,7 @@ main() {
         cs_allowlist_create "$unban_cs_name" "$unban_domain"
       fi
 
-      apply_targets "$TEST_MODE" "$unban_cs_name" "${targets[@]}"
+      apply_targets "$TEST_MODE" "$unban_cs_name" "$JAIL_FILTER" "${targets[@]}"
       ;;
     auto)
       log_output -e "${BLUE}=== Automatik für '${DOMAIN}' ===${NC}"
