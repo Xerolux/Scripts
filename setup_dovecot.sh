@@ -407,8 +407,8 @@ build_dovecot() {
     export CC="ccache gcc"
     log "  [+] ccache aktiviert"
   fi
-  CFLAGS="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3 -O2 -I$BUILD_ROOT/openssl-${OPENSSL_VERSION}/include" \
-  LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie -L$BUILD_ROOT/openssl-${OPENSSL_VERSION}" \
+  CFLAGS="-fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3 -O2 -I$BUILD_ROOT/openssl-install-${OPENSSL_VERSION}/include" \
+  LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie -L$BUILD_ROOT/openssl-install-${OPENSSL_VERSION}/lib -Wl,-rpath,$BUILD_ROOT/openssl-install-${OPENSSL_VERSION}/lib" \
   ./configure \
     systemdsystemunitdir=/lib/systemd/system \
     --enable-maintainer-mode \

@@ -203,15 +203,19 @@ log_build_summary() {
 
 prepare_openssl() {
   local ssl_dir="$BUILD_ROOT/openssl-${OPENSSL_VERSION}"
+  local ssl_build_dir="$BUILD_ROOT/openssl-build-${OPENSSL_VERSION}"
   local ssl_tar="$BUILD_ROOT/openssl-${OPENSSL_VERSION}.tar.gz"
+  local ssl_install="$BUILD_ROOT/openssl-install-${OPENSSL_VERSION}"
 
-  if [ -d "$ssl_dir" ] && [ -f "$ssl_dir/Configure" ]; then
-    log "OpenSSL $OPENSSL_VERSION Quellen bereits vorhanden: $ssl_dir"
+  # Check if OpenSSL is already built
+  if [ -d "$ssl_install" ] && [ -f "$ssl_install/lib/libssl.so" ]; then
+    log "OpenSSL $OPENSSL_VERSION bereits gebaut: $ssl_install"
     return 0
   fi
 
+  # Download tarball if needed
   if [ ! -f "$ssl_tar" ]; then
-    log "Lade OpenSSL $OPENSSL_VERSION Tarball"
+    log "Lade OpenSSL $OPENSSL_VERSION Tarball herunter..."
     curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --progress-bar \
       "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" -o "$ssl_tar" \
       || die "OpenSSL Download fehlgeschlagen"
@@ -219,7 +223,36 @@ prepare_openssl() {
     log "OpenSSL Tarball bereits vorhanden: $ssl_tar"
   fi
 
-  tar xzf "$ssl_tar" -C "$BUILD_ROOT"
-  [ -d "$ssl_dir" ] || die "Tarball entpackt kein Verzeichnis openssl-${OPENSSL_VERSION}"
-  log "OpenSSL Quellen: $ssl_dir"
+  # Extract to clean source directory for Nginx (if needed)
+  if [ ! -d "$ssl_dir" ]; then
+    log "Entpacke OpenSSL Quellen..."
+    tar xzf "$ssl_tar" -C "$BUILD_ROOT" || die "Entpacken fehlgeschlagen"
+    [ -d "$ssl_dir" ] || die "Tarball entpackt kein Verzeichnis openssl-${OPENSSL_VERSION}"
+  fi
+
+  # Build in separate build directory (keeps sources clean for Nginx)
+  mkdir -p "$ssl_build_dir" || die "Kann $ssl_build_dir nicht erstellen"
+  mkdir -p "$ssl_install" || die "Kann $ssl_install nicht erstellen"
+
+  log "Baue OpenSSL $OPENSSL_VERSION (Quellen: $ssl_dir, Build: $ssl_build_dir)..."
+  cd "$ssl_build_dir" || die "Kann nicht zu $ssl_build_dir wechseln"
+
+  # Configure for shared library build with PIC for ARM64
+  "$ssl_dir/Configure" \
+    linux-aarch64 \
+    --prefix="$ssl_install" \
+    --libdir=lib \
+    shared \
+    no-tests \
+    -fPIC \
+    || die "OpenSSL Configure fehlgeschlagen"
+
+  # Build
+  make -j "$(nproc)" || die "OpenSSL Kompilierung fehlgeschlagen"
+
+  # Install
+  make install || die "OpenSSL Installation fehlgeschlagen"
+
+  [ -f "$ssl_install/lib/libssl.so" ] || die "OpenSSL libssl.so nicht gefunden nach Build"
+  log "OpenSSL erfolgreich gebaut und installiert: $ssl_install"
 }
