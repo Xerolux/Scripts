@@ -508,7 +508,7 @@ main() {
       local -a prev=()
       mapfile -t prev < <(load_prev_set "$sf" || true)
 
-      apply_targets "$TEST_MODE" "$CS_LIST_NAME" "${targets[@]}"
+      apply_targets "$TEST_MODE" "$CS_LIST_NAME" "" "${targets[@]}"
 
       if [[ "${#prev[@]}" -gt 0 ]]; then
         local tfA tfB
