@@ -1277,7 +1277,8 @@ git_update() {
   local output current_branch
   current_branch="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
 
-  # Fetch latest updates from remote
+  [[ "$current_branch" != "main" ]] && git -C "$SCRIPT_DIR" checkout main >/dev/null 2>&1 || true
+
   git -C "$SCRIPT_DIR" fetch origin >/dev/null 2>&1 || return
 
   # Check if local changes exist (stash if needed)
@@ -1288,7 +1289,7 @@ git_update() {
   fi
 
   # Hard reset to origin/main to avoid merge conflicts
-  output="$(git -C "$SCRIPT_DIR" reset --hard origin/"$current_branch" 2>&1)" || {
+  output="$(git -C "$SCRIPT_DIR" reset --hard origin/main 2>&1)" || {
     _fail "git reset fehlgeschlagen: $output"
     return
   }
