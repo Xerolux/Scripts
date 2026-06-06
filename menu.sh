@@ -1015,44 +1015,56 @@ menu_backuprestore() {
 
 menu_unbanip() {
   while true; do
-    clear; draw_header "IP Unban"; echo
+    clear; draw_header "IP Unban + Whitelist"; echo
     local choice
     choice=$(choose_or_back "" \
-      "Automatikmodus" \
-      "Bans anzeigen" \
-      "Gezieltes Unban" \
+      "Auto-Modus (Unban + Whitelist)" \
+      "Auto-Modus (Dry-Run / Test)" \
+      "Bans anzeigen (F2B + CrowdSec)" \
       "$(sep)" \
-      "Service installieren" \
+      "Gezieltes Unban (IP/Domain)" \
+      "Gezieltes Unban (nur 1 Jail)" \
+      "$(sep)" \
+      "Service installieren (Timer)" \
       "Service-Status" \
       "Service deinstallieren" \
-      "Interval aktualisieren" \
+      "Interval aendern" \
       "$(sep)" \
-      "Eigene Argumente...")
+      "Eigene Argumente...") || break
     case "$choice" in
-      "Automatik"*)
-        local -a args=()
-        ask_confirm "Dry-Run (Test-Modus)?" && args+=(--test)
-        run_script "unban_ip.sh" "${args[@]}" ;;
-      "Bans"*)  run_script "unban_ip.sh" --bans ;;
-      "Geziel"*)
+      "Auto-Modus (Unban"*)
+
+        run_script "unban_ip.sh" ;;
+      "Auto-Modus (Dry"*)
+
+        run_script "unban_ip.sh" --test ;;
+      "Bans"*)
+        run_script "unban_ip.sh" --bans ;;
+      "Gezieltes Unban (IP"*)
         local t; t="$(gum input --placeholder='IP / CIDR / Domain')" || continue
-        [ -z "${t// }" ] && { _fail "Kein Target."; continue; }
+        [ -z "${t// }" ] && { _fail "Kein Target angegeben."; continue; }
         run_script "unban_ip.sh" --unban "$t" ;;
+      "Gezieltes Unban (nur"*)
+        local t j; t="$(gum input --placeholder='IP oder Domain')" || continue
+        [ -z "${t// }" ] && { _fail "Kein Target angegeben."; continue; }
+        j="$(gum input --placeholder='Jail-Name (z.B. sshd, nginx-limit-req)')" || continue
+        [ -z "${j// }" ] && { _fail "Kein Jail angegeben."; continue; }
+        run_script "unban_ip.sh" --unban "$t" --jail "$j" ;;
       *"──"*)   continue ;;
       "Service installieren"*)
-        ask_confirm "Service installieren? (systemd Timer alle 30min)" && \
+        ask_confirm "Unban-Service installieren? (systemd Timer alle 30min)" && \
         run_script "unban-ip-installer.sh" install ;;
       "Service-Status"*)
         clear; run_script "unban-ip-installer.sh" status; read -r -p " Enter..." _ ;;
       "Service deinstallieren"*)
-        ask_confirm "Service deinstallieren?" && \
+        ask_confirm "Unban-Service deinstallieren?" && \
         run_script "unban-ip-installer.sh" uninstall ;;
       "Interval"*)
         local interval; interval="$(gum input --placeholder='Minuten (Standard: 30)')" || continue
         [ -z "${interval// }" ] && interval="30"
         run_script "unban-ip-installer.sh" update "$interval" ;;
       "Eigene"*) do_custom_args "unban_ip.sh" ;;
-      *)        return ;;
+      *)        break ;;
     esac
   done
 }
@@ -1060,9 +1072,9 @@ menu_unbanip() {
 menu_f2btest() {
   clear; draw_header "Fail2Ban Test"; echo
   local choice
-  choice=$(choose_or_back "" "Test ausfuehren" "Eigene Argumente...")
+  choice=$(choose_or_back "" "Fail2Ban-Test ausfuehren" "Eigene Argumente...") || return
   case "$choice" in
-    "Test"*)  run_script "f2b_test.sh" ;;
+    "Fail2Ban"*)  run_script "f2b_test.sh" ;;
     "Eigene"*) do_custom_args "f2b_test.sh" ;;
   esac
 }
