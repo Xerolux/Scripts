@@ -125,7 +125,11 @@ f2b_is_banned_in_jail() {
   local j="$1" t="$2"
   local lst; lst="$(fail2ban-client status "$j" 2>/dev/null | sed -n 's/.*Banned IP list:\s*//p')"
   [[ -z "${lst:-}" ]] && return 1
-  tr ' ' '\n' <<<"$lst" | grep -Fxq -- "$t"
+  if [[ "$t" == *:* ]]; then
+    tr ' ' '\n' <<<"$lst" | grep -Fiq -- "$t"
+  else
+    tr ' ' '\n' <<<"$lst" | grep -Fxq -- "$t"
+  fi
 }
 
 f2b_ignore_contains() {
@@ -166,7 +170,7 @@ f2b_unban() {
   done < <(get_f2b_jails)
 
   if [[ "$unban_count" -eq 0 ]]; then
-    if [[ -z "$jail_filter" ]]; then
+    if [[ -z "$jail_filter" && "$t" != */* ]]; then
       fail2ban-client unban "$t" >/dev/null 2>&1 || true
     fi
   fi
@@ -272,9 +276,13 @@ cs_unban_any() {
     return 0
   fi
   if [[ "$t" == */* ]]; then
-    cscli decisions delete --range "$t" >/dev/null 2>&1 || true
+    if [[ "$t" == *:* ]]; then
+      cscli decisions delete --ip "${t%/*}" >/dev/null 2>&1 || true
+    else
+      cscli decisions delete --range "$t" >/dev/null 2>&1 || true
+    fi
   else
-    cscli decisions delete --ip "$t"    >/dev/null 2>&1 || true
+    cscli decisions delete --ip "$t" >/dev/null 2>&1 || true
   fi
 }
 
@@ -439,11 +447,11 @@ main() {
       ;;
     unban)
       local unban_domain="$DOMAIN"
-      if [[ ! "$UNBAN_ARG" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ ! "$UNBAN_ARG" =~ : ]] && [[ ! "$UNBAN_ARG" =~ / ]]; then
+      if [[ "$UNBAN_ARG" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]] || [[ "$UNBAN_ARG" =~ : ]] || [[ "$UNBAN_ARG" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+         targets=( "$UNBAN_ARG" )
+      else
          unban_domain="$UNBAN_ARG"
          mapfile -t targets < <(build_targets_for_domain "$UNBAN_ARG" "$V6_PLEN")
-      else
-         targets=( "$UNBAN_ARG" )
       fi
       
       if [[ "${#targets[@]}" -eq 0 ]]; then
