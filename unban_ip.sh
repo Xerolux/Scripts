@@ -79,8 +79,22 @@ get_cs_allowlist_name() {
 resolve_all_ips() {
   local d="$1"
   log_output -e "${BLUE}Auflösen: ${d}${NC}"
-  dig +short A "$d"    2>/dev/null | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || true
-  dig +short AAAA "$d" 2>/dev/null | grep -Ei '^[0-9a-f:]{2,}$' || true
+  local v4="" v6=""
+
+  if command -v dig >/dev/null 2>&1; then
+    v4="$(dig +short A "$d" @1.1.1.1 2>/dev/null | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || true)"
+    v6="$(dig +short AAAA "$d" @1.1.1.1 2>/dev/null | grep -Ei '^[0-9a-f:]{2,}$' || true)"
+  fi
+
+  if [[ -z "$v4" ]] && command -v getent >/dev/null 2>&1; then
+    v4="$(getent ahostsv4 "$d" 2>/dev/null | awk '{print $1}' | sort -u | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || true)"
+  fi
+  if [[ -z "$v6" ]] && command -v getent >/dev/null 2>&1; then
+    v6="$(getent ahosts6 "$d" 2>/dev/null | awk '{print $1}' | sort -u | grep -Ei '^[0-9a-f:]{2,}$' || true)"
+  fi
+
+  [[ -n "$v4" ]] && printf '%s\n' "$v4"
+  [[ -n "$v6" ]] && printf '%s\n' "$v6"
 }
 
 calculate_ipv6_prefix_base() {
