@@ -165,13 +165,14 @@ f2b_unban() {
     return 0
   fi
 
-  local unban_count=0
+  local unban_count=0 checked=0
   while IFS= read -r j; do
     [[ -z "$j" ]] && continue
     # Wenn --jail Filter gesetzt, nur den Jail unbanned
     if [[ -n "$jail_filter" && "$j" != "$jail_filter" ]]; then
       continue
     fi
+    checked=$((checked + 1))
     
     if f2b_is_banned_in_jail "$j" "$t"; then
       if fail2ban-client set "$j" unbanip "$t" >/dev/null 2>&1; then
@@ -187,6 +188,7 @@ f2b_unban() {
     if [[ -z "$jail_filter" && "$t" != */* ]]; then
       fail2ban-client unban "$t" >/dev/null 2>&1 || true
     fi
+    log_output -e "${GREEN}F2B: '$t' nicht gebannt ($checked Jails).${NC}"
   fi
 }
 
@@ -194,30 +196,42 @@ f2b_add_ignore() {
   local v="$1" test="$2"
   command -v fail2ban-client >/dev/null 2>&1 || return 0
 
+  local added=0 already=0 total=0
   while IFS= read -r j; do
     [[ -z "$j" ]] && continue
+    total=$((total + 1))
+
     if f2b_ignore_contains "$j" "$v"; then
+      already=$((already + 1))
       continue
     fi
 
     if [[ "$test" == "true" ]]; then
       log_output -e "${GREEN}[TEST] F2B: add ignoreip '$v' -> '$j'.${NC}"
+      added=$((added + 1))
       continue
     fi
 
     if fail2ban-client set "$j" addignoreip "$v" >/dev/null 2>&1; then
       log_output -e "${GREEN}F2B: ignoreip '$v' in '$j' gesetzt.${NC}"
+      added=$((added + 1))
     else
       echo -e "${RED}F2B: addignoreip fehlgeschlagen ($v/$j).${NC}" >&2
     fi
   done < <(get_f2b_jails)
+
+  if [[ "$already" -gt 0 ]]; then
+    log_output -e "${BLUE}F2B: '$v' bereits in $already/$total Jails whitelisted.${NC}"
+  fi
 }
 
 f2b_add_ignore_to_jail() {
   local v="$1" jail="$2" test="$3"
   command -v fail2ban-client >/dev/null 2>&1 || return 0
   
-  if ! f2b_ignore_contains "$jail" "$v"; then
+  if f2b_ignore_contains "$jail" "$v"; then
+    log_output -e "${BLUE}F2B: '$v' bereits in '$jail' whitelisted.${NC}"
+  else
     if [[ "$test" == "true" ]]; then
       log_output -e "${GREEN}[TEST] F2B: add ignoreip '$v' -> '$jail'.${NC}"
     else
