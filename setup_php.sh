@@ -1077,7 +1077,7 @@ build_php() {
   LD_OPT="-Wl,-z,relro -Wl,-z,now -pie"
 
   if command -v ccache >/dev/null 2>&1; then
-    CC_OPT="$CC_OPT -fuse-ld=lld 2>/dev/null || true"
+    CC_OPT="$CC_OPT -fuse-ld=lld"
     export CC="ccache gcc"
     export CXX="ccache g++"
     log "  [+] ccache aktiviert (CC=$CC)"
@@ -2527,7 +2527,7 @@ install_all() {
   echo "  Log:            $LOG_FILE"
 }
 
-main() {
+cmd_pecl_only() {
   check_os_arch
   if [ $# -eq 0 ]; then
     die "pecl-only: Keine Extension angegeben. Usage: $0 pecl-only ext1 ext2 ..."

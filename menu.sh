@@ -1216,7 +1216,7 @@ auto_update_component() {
 
   # Update .env file
   local env_file="$SCRIPT_DIR/${script%.sh}.env"
-  if sed -i "s/^${env_var}=.*/\${env_var}=\"${available}\"/" "$env_file" 2>/dev/null; then
+  if sed -i "s/^${env_var}=.*/${env_var}=\"${available}\"/" "$env_file" 2>/dev/null; then
     _ok "  [UPDATE] $script: $current → $available"
     return 0
   fi
@@ -1289,8 +1289,7 @@ git_update() {
   local output current_branch
   current_branch="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
 
-  [[ "$current_branch" != "main" ]] && git -C "$SCRIPT_DIR" checkout main >/dev/null 2>&1 || true
-
+  # Fetch latest updates from remote
   git -C "$SCRIPT_DIR" fetch origin >/dev/null 2>&1 || return
 
   # Check if local changes exist (stash if needed)
@@ -1300,8 +1299,8 @@ git_update() {
     git -C "$SCRIPT_DIR" stash >/dev/null 2>&1
   fi
 
-  # Hard reset to origin/main to avoid merge conflicts
-  output="$(git -C "$SCRIPT_DIR" reset --hard origin/main 2>&1)" || {
+  # Hard reset to tracking branch to avoid merge conflicts
+  output="$(git -C "$SCRIPT_DIR" reset --hard origin/"$current_branch" 2>&1)" || {
     _fail "git reset fehlgeschlagen: $output"
     return
   }
