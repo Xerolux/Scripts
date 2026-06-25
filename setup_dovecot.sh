@@ -19,17 +19,15 @@ set -Eeuo pipefail
 # Cleanup on exit/error
 trap 'rm -f /tmp/dovecot-build-$$* 2>/dev/null' EXIT INT TERM
 
-if [[ ! -f "setup_dovecot.env" ]]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -f "$SCRIPT_DIR/setup_dovecot.env" ]]; then
   echo "FEHLER: setup_dovecot.env nicht gefunden. Bitte aus setup_dovecot.env.example erstellen." >&2
   exit 1
 fi
-source "setup_dovecot.env"
+source "$SCRIPT_DIR/setup_dovecot.env"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
-
-# Prepare OpenSSL from source (for consistency with other components)
-prepare_openssl
 
 # Offizielle Tarballs (stabiler als Git-Clone, enthalten fertige configure-Skripte)
 DOVECOT_TARBALL="https://dovecot.org/releases/2.4/dovecot-${DOVECOT_VERSION}.tar.gz"
@@ -1560,6 +1558,7 @@ uninstall_cmd() {
 package_dovecot() {
   log "=== Starte Dovecot-Core Paket-Build ==="
   install_build_deps
+  prepare_openssl
 
   # Nur Dovecot-Tarball herunterladen und entpacken
   mkdir -p "$BUILD_ROOT"
@@ -1781,6 +1780,7 @@ POSTRM
 package_pigeonhole() {
   log "=== Starte Pigeonhole Paket-Build ==="
   install_build_deps
+  prepare_openssl
 
   mkdir -p "$BUILD_ROOT"
 
@@ -1895,6 +1895,7 @@ package_all() {
   log "=== Starte Paket-Build (Core + Pigeonhole) ==="
   start_build_timer
   install_build_deps
+  prepare_openssl
   prepare_sources
   build_dovecot
   build_pigeonhole
@@ -2142,7 +2143,7 @@ main() {
       apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
     fi
     echo "Starte Skript in Screen Session: dovecot_build ..."
-    exec screen -dmS dovecot_build bash "$0" "$@"
+    exec screen -dmS dovecot_build bash "$SCRIPT_DIR/setup_dovecot.sh" "$@"
   fi
 
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"
@@ -2155,6 +2156,7 @@ main() {
     install)             install_all ;;
     build-only)
       install_build_deps
+      prepare_openssl
       prepare_sources
       build_dovecot
       build_pigeonhole

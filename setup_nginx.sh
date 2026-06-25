@@ -31,13 +31,14 @@ set -Eeuo pipefail
 
 trap 'rm -f /tmp/nginx-build-$$* 2>/dev/null' EXIT INT TERM
 
-if [[ ! -f "setup_nginx.env" ]]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -f "$SCRIPT_DIR/setup_nginx.env" ]]; then
   echo "FEHLER: setup_nginx.env nicht gefunden. Bitte aus setup_nginx.env.example erstellen." >&2
   exit 1
 fi
-source "setup_nginx.env"
+source "$SCRIPT_DIR/setup_nginx.env"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 NGINX_TARBALL_URL="https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
@@ -1806,7 +1807,7 @@ main() {
       apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
     fi
     echo "Starte Skript in Screen Session: nginx_build ..."
-    exec screen -dmS nginx_build bash "$0" "$@"
+    exec screen -dmS nginx_build bash "$SCRIPT_DIR/setup_nginx.sh" "$@"
   fi
 
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"

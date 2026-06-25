@@ -5,17 +5,20 @@ set -euo pipefail
 # Z-Push PRO Setup (with rollback & safety)
 ############################################
 
-if [[ ! -f "setup-zpush.env" ]]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -f "$SCRIPT_DIR/setup-zpush.env" ]]; then
   echo "FEHLER: setup-zpush.env nicht gefunden. Bitte aus setup-zpush.env.example erstellen." >&2
   exit 1
 fi
-source "setup-zpush.env"
+source "$SCRIPT_DIR/setup-zpush.env"
 
 ZPUSH_DIR="/etc/z-push"
 NGINX_AVAILABLE="/etc/nginx/sites-available"
 NGINX_ENABLED="/etc/nginx/sites-enabled"
 
 TMP_DIR="/root/zpush-setup-backup-$(date +%s)"
+TMP_FILES=()
 
 ############################################
 # Logging
@@ -43,6 +46,7 @@ rollback() {
 }
 
 trap rollback ERR
+trap 'rm -f "${TMP_FILES[@]}" 2>/dev/null || true' EXIT
 
 ############################################
 # Root Check
@@ -57,7 +61,9 @@ trap rollback ERR
 install_zpush_from_github_release() {
   local zpush_version="${ZPUSH_VERSION:-2.7.6}"
   local archive_url="https://github.com/Z-Hub/Z-Push/archive/refs/tags/${zpush_version}.tar.gz"
-  local archive_path="/tmp/zpush-${zpush_version}.tar.gz"
+  local archive_path
+  archive_path="$(mktemp -t "zpush-${zpush_version}.XXXXXX.tar.gz")"
+  TMP_FILES+=("$archive_path")
   local extract_dir="/tmp/Z-Push-${zpush_version}"
 
   log "Installiere Z-Push aus GitHub Release ${zpush_version} (Fallback)"
@@ -271,7 +277,8 @@ php -l "${IMAP_CONF}" >/dev/null || fail "Z-Push IMAP Config hat Syntaxfehler: $
 # Nginx Config (Temp)
 ############################################
 
-TMP_CONF="/tmp/zpush-nginx.conf"
+TMP_CONF="$(mktemp -t zpush-nginx.XXXXXX.conf)"
+TMP_FILES+=("$TMP_CONF")
 
 log "Nginx Config schreiben (temp)"
 
@@ -344,7 +351,9 @@ fi
 
 log "Teste ActiveSync Endpoint"
 
-HTTP_CODE="$(curl -k -sS -o /tmp/zpush-endpoint-check.out -w "%{http_code}" https://"${PUSH_DOMAIN}"/Microsoft-Server-ActiveSync || true)"
+ENDPOINT_CHECK_OUT="$(mktemp -t zpush-endpoint-check.XXXXXX.out)"
+TMP_FILES+=("$ENDPOINT_CHECK_OUT")
+HTTP_CODE="$(curl -k -sS -o "$ENDPOINT_CHECK_OUT" -w "%{http_code}" https://"${PUSH_DOMAIN}"/Microsoft-Server-ActiveSync || true)"
 echo "HTTP Status: ${HTTP_CODE}"
 if [[ -z "${HTTP_CODE}" || "${HTTP_CODE}" == "000" ]]; then
   warn "HTTP FAIL (keine Antwort)"

@@ -24,24 +24,21 @@ set -Eeuo pipefail
 # Cleanup on exit/error
 trap 'rm -f /tmp/postfix-build-$$* 2>/dev/null' EXIT INT TERM
 
-if [[ ! -f "setup_postfix.env" ]]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -f "$SCRIPT_DIR/setup_postfix.env" ]]; then
   echo "FEHLER: setup_postfix.env nicht gefunden. Bitte aus setup_postfix.env.example erstellen." >&2
   exit 1
 fi
-source "setup_postfix.env"
+source "$SCRIPT_DIR/setup_postfix.env"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
-
-# Prepare OpenSSL from source (for consistency with other components)
-prepare_openssl
 
 # ftp.porcupine.org ist ein FTP-Server und unterstützt kein HTTPS → http://
 POSTFIX_TARBALL_URLS=(
+  "http://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
   "https://ftp.gwdg.de/pub/misc/postfix/official/postfix-${POSTFIX_VERSION}.tar.gz"
   "https://fossies.org/linux/misc/postfix-${POSTFIX_VERSION}.tar.gz"
-  "http://ftp.porcupine.org/mirrors/postfix-release/official/postfix-${POSTFIX_VERSION}.tar.gz"
-  "http://de.postfix.org/ftpmirror/official/postfix-${POSTFIX_VERSION}.tar.gz"
 )
 
 # ------------------------------------------------------------------------------
@@ -1216,6 +1213,7 @@ package_all() {
   log "=== Starte Postfix Paket-Build ==="
   start_build_timer
   install_build_deps
+  prepare_openssl
   prepare_sources
   build_postfix
   create_deb_package
@@ -1304,7 +1302,7 @@ main() {
       apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
     fi
     echo "Starte Skript in Screen Session: postfix_build ..."
-    exec screen -dmS postfix_build bash "$0" "$@"
+    exec screen -dmS postfix_build bash "$SCRIPT_DIR/setup_postfix.sh" "$@"
   fi
 
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"

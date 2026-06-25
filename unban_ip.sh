@@ -3,13 +3,19 @@
 # Unban + Whitelist (Fail2Ban & CrowdSec) für IPv4, IPv6 und IPv6-Präfix
 # Verbessert: Fix für fehlendes del_ignore, dynamische Allowlist-Namen
 # ==============================================================================
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
 set -o errexit -o nounset -o pipefail
 
-if [[ ! -f "unban_ip.env" ]]; then
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -f "$SCRIPT_DIR/unban_ip.env" ]]; then
   echo "FEHLER: unban_ip.env nicht gefunden. Bitte aus unban_ip.env.example erstellen." >&2
   exit 1
 fi
-source "unban_ip.env"
+source "$SCRIPT_DIR/unban_ip.env"
 
 # Farben
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; BLUE=$'\033[0;34m'; NC=$'\033[0m'
@@ -447,8 +453,6 @@ build_targets_for_domain() {
 
 # ---------------- Main ----------------
 main() {
-  require_root
-  acquire_lock
   local MODE="auto" DOMAIN="$DOMAIN_DEFAULT" UNBAN_ARG="" V6_PLEN="$IPV6_PREFIX_LENGTH_DEFAULT" TEST_MODE="false" JAIL_FILTER=""
   local -a targets=()
 
@@ -465,6 +469,9 @@ main() {
       *) echo -e "${RED}Unbekannte Option: $1${NC}" >&2; usage; exit 1;;
     esac
   done
+
+  require_root
+  acquire_lock
 
   local CS_LIST_NAME
   CS_LIST_NAME="$(get_cs_allowlist_name "$DOMAIN")"

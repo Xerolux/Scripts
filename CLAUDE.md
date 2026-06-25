@@ -39,10 +39,11 @@ trap 'rm -f /tmp/build-$$* 2>/dev/null' EXIT INT TERM
 ### Configuration Management
 ```bash
 # Load configuration from .env
-if [[ ! -f "setup_php.env" ]]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ! -f "$SCRIPT_DIR/setup_php.env" ]]; then
   echo "FEHLER: setup_php.env nicht gefunden" >&2; exit 1
 fi
-source "setup_php.env"
+source "$SCRIPT_DIR/setup_php.env"
 ```
 
 ### Function Organization

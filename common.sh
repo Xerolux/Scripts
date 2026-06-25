@@ -114,11 +114,12 @@ sign_packages() {
 # --- Local Repository Auto-Update ---
 
 update_local_repo_if_configured() {
-  local repo_script repo_env repo_env_example repo_dir=""
+  local caller_dir repo_script repo_env repo_env_example repo_dir=""
 
-  repo_script="$(dirname "${BASH_SOURCE[1]:-$0}")/setup_local_repo.sh"
-  repo_env="$(dirname "${BASH_SOURCE[1]:-$0}")/setup_local_repo.env"
-  repo_env_example="$(dirname "${BASH_SOURCE[1]:-$0}")/setup_local_repo.env.example"
+  caller_dir="$(cd "$(dirname "${BASH_SOURCE[1]:-$0}")" && pwd)"
+  repo_script="$caller_dir/setup_local_repo.sh"
+  repo_env="$caller_dir/setup_local_repo.env"
+  repo_env_example="$caller_dir/setup_local_repo.env.example"
 
   [ -x "$repo_script" ] || return 0
 
@@ -174,7 +175,7 @@ start_build_timer() {
   BUILD_START_SECS="$SECONDS"
 }
 
- elapsed_build_time() {
+elapsed_build_time() {
   local s=$((SECONDS - BUILD_START_SECS))
   if [ "$s" -ge 3600 ]; then
     printf '%dh%dm%ds' $((s/3600)) $((s%3600/60)) $((s%60))

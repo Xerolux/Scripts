@@ -27,17 +27,15 @@
 # ==============================================================================
 set -Eeuo pipefail
 
-if [[ ! -f "setup_php.env" ]]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -f "$SCRIPT_DIR/setup_php.env" ]]; then
   echo "FEHLER: setup_php.env nicht gefunden. Bitte aus setup_php.env.example erstellen." >&2
   exit 1
 fi
-source "setup_php.env"
+source "$SCRIPT_DIR/setup_php.env"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
-
-# Prepare OpenSSL from source (for consistency with other components)
-prepare_openssl
 
 PHP_TARBALL_URL="https://www.php.net/distributions/php-${PHP_VERSION}.tar.gz"
 PHP_PREFIX="/usr"
@@ -2416,6 +2414,7 @@ package_all() {
   start_build_timer
   log "PECL-Extensions: ${#PECL_EXTENSIONS[@]}"
   install_build_deps
+  prepare_openssl
   prepare_sources
   download_pecl_sources
   build_php
@@ -2601,7 +2600,7 @@ main() {
       apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y screen
     fi
     echo "Starte Skript in Screen Session: php_build ..."
-    exec screen -dmS php_build bash "$0" "$@"
+    exec screen -dmS php_build bash "$SCRIPT_DIR/setup_php.sh" "$@"
   fi
 
   mkdir -p "$BACKUP_ROOT" "$PACKAGE_DIR"
