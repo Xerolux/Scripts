@@ -273,7 +273,7 @@ prepare_sources() {
 # Wichtig: Postfix prüft NICHT automatisch ob Libs vorhanden sind.
 # Wir prüfen selbst mit [ -f ... ] bevor wir Flags setzen.
 #
-# Module-Übersicht für ISPConfig auf saturn:
+# Module-Übersicht für ISPConfig (Postfix-Build-Optionen):
 #   -DHAS_MYSQL         MariaDB/MySQL virtual_mailbox_maps, transport_maps usw.
 #   -DUSE_SASL_AUTH     SMTP-Auth via Cyrus SASL (Dovecot-SASL-Socket)
 #   -DUSE_CYRUS_SASL    Cyrus SASL Bibliothek

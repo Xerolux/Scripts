@@ -5,6 +5,7 @@ set -euo pipefail
 trap 'rm -f /tmp/f2b-$$* 2>/dev/null' EXIT INT TERM
 
 LOG_FILE="${LOG_FILE:-}"
+[[ "$LOG_FILE" == "-" ]] && LOG_FILE=""  # "-" wuerde Datei statt stdout erzeugen
 log() {
   local line="[$(date '+%F %T')] $*"
   if [[ -n "$LOG_FILE" ]]; then

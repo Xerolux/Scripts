@@ -25,6 +25,7 @@ if [[ ! -f "$SCRIPT_DIR/setup_backup_restore.env" ]]; then
 fi
 source "$SCRIPT_DIR/setup_backup_restore.env"
 
+[[ "${LOG_FILE:-}" == "-" ]] && LOG_FILE=""  # "-" wuerde Datei statt stdout erzeugen
 log()  { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
 die()  { log "FEHLER: $*"; exit 1; }
 
@@ -521,6 +522,7 @@ main() {
   mkdir -p "$BACKUP_ROOT"
   touch "$LOG_FILE" || die "Kann Log-Datei nicht erstellen: $LOG_FILE"
 
+  # shellcheck disable=SC2046  # intended word splitting for set --
   set -- $(parse_force_flag "$@")
 
   case "${1:-help}" in

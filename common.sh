@@ -16,6 +16,7 @@
 #   ensure_ccache()
 # ==============================================================================
 # Do NOT source this directly without setting LOG_FILE first.
+[[ "${LOG_FILE:-}" == "-" ]] && LOG_FILE=""  # "-" wuerde Datei statt stdout erzeugen
 
 # --- Logging ---
 
@@ -52,7 +53,7 @@ generate_checksums() {
   local pkg_dir="${1:-$PACKAGE_DIR}"
   if [ -d "$pkg_dir" ] && find "$pkg_dir" -maxdepth 1 -name '*.deb' -type f -print -quit | grep -q .; then
     log "Erstelle SHA256SUMS fuer Pakete..."
-    cd "$pkg_dir"
+    cd "$pkg_dir" || return 1
     sha256sum ./*.deb > SHA256SUMS
     log "SHA256SUMS erstellt: $(wc -l < SHA256SUMS) Pakete"
     tee -a "$LOG_FILE" < SHA256SUMS

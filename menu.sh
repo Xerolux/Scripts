@@ -2,7 +2,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR" || exit 1
 
 SETTINGS_FILE="$HOME/.build_settings.env"
 SCREEN_MAP=("php_build:setup_php.sh" "nginx_build:setup_nginx.sh" "dovecot_build:setup_dovecot.sh" "postfix_build:setup_postfix.sh")
@@ -1116,9 +1116,9 @@ menu_clean() {
     case "$choice" in
       "PHP: S"*)  rm -rf "$(get_env_var "$PE" STAGE_PHP)" 2>/dev/null || true ;;
       "PHP: B"*)  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-$(get_env_var "$PE" PHP_VERSION)" 2>/dev/null || true ;;
+      "PHP: Pak"*) rm -f "$(get_env_var "$PE" PACKAGE_DIR)"/*.deb 2>/dev/null || true ;;
       "PHP: P"*)  rm -rf "$(get_env_var "$PE" BUILD_ROOT)/php-pecl" 2>/dev/null || true ;;
       "PHP: G"*)  rm -rf /tmp/php-pgo-stage 2>/dev/null || true ;;
-      "PHP: Pak"*) rm -f "$(get_env_var "$PE" PACKAGE_DIR)"/*.deb 2>/dev/null || true ;;
       "PHP: A"*)  clean_php_all ;;
       "Nginx"*)   rm -rf "$(get_env_var "$NE" STAGE_NGINX)" 2>/dev/null || true ;;
       "Dovecot"*) rm -rf "$(get_env_var "$DE" STAGE_DOVECOT)" 2>/dev/null || true ;;
@@ -1196,7 +1196,10 @@ menu_sysinfo() {
 compare_versions() {
   local current="$1" available="$2"
   # Simple version comparison: split by dots and compare numerically
-  local IFS=. current_arr=($current) available_arr=($available)
+  local IFS=.
+  local -a current_arr available_arr
+  read -ra current_arr <<< "$current"
+  read -ra available_arr <<< "$available"
   for ((i=0; i<${#available_arr[@]}; i++)); do
     local c=${current_arr[$i]:-0} a=${available_arr[$i]:-0}
     [ "$a" -gt "$c" ] && return 0  # Update available
@@ -1360,7 +1363,7 @@ main_menu() {
       Lokales*)   menu_localrepo ;;
       IP*)        menu_unbanip ;;
       Fail2Ban*)  menu_f2btest ;;
-      Screen*|"Screens"*) menu_screens ;;
+      Screen*)             menu_screens ;;
       Clean*)     menu_clean ;;
       Settings*)  menu_settings ;;
       System*)    menu_sysinfo ;;

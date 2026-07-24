@@ -236,7 +236,7 @@ build_index() {
     while IFS= read -r deb; do
       [ -f "$deb" ] || continue
       local pkg_name
-      pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || continue)"
+      pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null)" || continue
       dpkg-deb -c "$deb" 2>/dev/null | awk -v pkg="$pkg_name" '
         /^\.\// && !/\/$/ {
           f=substr($0, index($0,$6))
@@ -328,7 +328,7 @@ cleanup_old_versions() {
   for deb in ./*.deb; do
     [ -f "$deb" ] || continue
     local pkg_name pkg_ver
-    pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || continue)"
+    pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null)" || continue
     pkg_ver="$(dpkg-deb -f "$deb" Version 2>/dev/null || echo 0)"
 
     if [ -n "${latest_pkg[$pkg_name]+x}" ]; then
@@ -524,14 +524,14 @@ show_diff() {
 
   for deb in "$REPO_STABLE"/*.deb; do
     [ -f "$deb" ] || continue
-    pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || continue)"
+    pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null)" || continue
     pkg_ver="$(dpkg-deb -f "$deb" Version 2>/dev/null || echo "?")"
     stable_pkgs["$pkg_name"]="$pkg_ver"
   done
 
   for deb in "$REPO_TESTING"/*.deb; do
     [ -f "$deb" ] || continue
-    pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null || continue)"
+    pkg_name="$(dpkg-deb -f "$deb" Package 2>/dev/null)" || continue
     pkg_ver="$(dpkg-deb -f "$deb" Version 2>/dev/null || echo "?")"
     testing_pkgs["$pkg_name"]="$pkg_ver"
   done

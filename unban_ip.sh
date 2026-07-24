@@ -54,9 +54,9 @@ Optionen:
   -h, --help           Hilfe
 
 Beispiele:
-  sudo $0 --unban 94.31.113.92                           # Alle Jails
-  sudo $0 --unban 94.31.113.92 --jail nginx-limit-req    # Nur nginx-limit-req
-  sudo $0 --unban home.blueml.one                        # Domain auflösen & unbanned
+  sudo $0 --unban 198.51.100.10                          # Alle Jails (Beispiel-IP RFC 5737)
+  sudo $0 --unban 198.51.100.10 --jail nginx-limit-req   # Nur nginx-limit-req
+  sudo $0 --unban home.example.com                       # Domain auflösen & unbanned
   sudo $0 --bans                                          # Status anzeigen
 EOF
 }

@@ -206,6 +206,7 @@ prepare_pigeonhole_runtime_stage() {
     local keep=0
     local p
     for p in "${keep_file_patterns[@]}"; do
+      # shellcheck disable=SC2254  # $p is intended glob pattern
       case "$rel" in
         $p)
           keep=1
@@ -270,7 +271,7 @@ install_build_deps() {
   ensure_ccache
   setup_ccache_env
 
-  # saturn nutzt MariaDB 12.x – libmysqlclient-dev (Oracle) muss vorher
+  # Bei MariaDB-Systemen (z.B. MariaDB 12.x) muss libmysqlclient-dev (Oracle) vorher
   # entfernt werden da es mit libmariadb-dev kollidiert.
   # libmariadb-dev liefert dieselbe API für --with-mysql im Dovecot-Build.
   if dpkg -s libmysqlclient-dev >/dev/null 2>&1; then
